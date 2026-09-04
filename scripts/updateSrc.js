@@ -1,6 +1,5 @@
-const fs = require("fs");
 const path = require("path");
-const https = require("https");
+const { ensureMods, writeAtomically } = require("./ensureMods");
 
 const files = [
     {
@@ -11,40 +10,24 @@ const files = [
         url: "https://raw.githubusercontent.com/ppy/osu-server-spectator/master/osu.Server.Spectator/Hubs/Referee/IRefereeHubServer.cs",
         dest: "IRefereeHubServer.cs",
     },
-    {
-        url: "https://raw.githubusercontent.com/ppy/osu-web/master/database/mods.json",
-        dest: "../src/renderer/mods.json",
-    },
 ];
 
-function download(url, dest) {
-    return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(dest);
-        https.get(url, (response) => {
-            response.pipe(file);
-            file.on("finish", () => {
-                file.close(resolve);
-            });
-        }).on("error", (err) => {
-            fs.unlink(dest, () => reject(err));
-        });
-    });
+async function download(url, dest) {
+    const response = await fetch(url); // fetch follows redirects, https.get doesnt
+    if (!response.ok) throw new Error(`Could not download ${url}: HTTP ${response.status}`);
+    // temp first so a failed dl cant nuke the file
+    await writeAtomically(dest, await response.text());
 }
 
 async function run() {
-    // remove old files
-    ["IRefereeHubClient.cs", "IRefereeHubServer.cs", "../src/renderer/mods.json"]
-        .forEach((f) => {
-            const p = path.resolve(__dirname, f);
-            if (fs.existsSync(p)) fs.unlinkSync(p);
-        });
-
-    // download new ones
     for (const f of files) {
-        const destPath = path.resolve(__dirname, f.dest);
-        await download(f.url, destPath);
+        await download(f.url, path.resolve(__dirname, f.dest));
         console.log(`Downloaded ${f.dest}`);
     }
+    await ensureMods({ force: true });
 }
 
-run().catch(console.error);
+run().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+});

@@ -1,13 +1,16 @@
 {
   "name": "apl_ref",
-  "version": "0.7.2",
+  "version": "0.7.5",
   "description": "APL's Ref Client",
   "main": "main.js",
   "scripts": {
-    "start": "electron-forge start",
-    "make": "electron-forge make",
+    "start": "npm run ensure:mods && electron-forge start",
+    "ensure:mods": "node scripts/ensureMods.js",
+    "build:css": "tailwindcss -i ./src/renderer/css/tailwind-input.css -o ./src/renderer/css/tailwind.css --minify",
+    "build:assets": "npm run ensure:mods && npm run build:css",
+    "make": "npm run build:assets && electron-forge make",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "package": "electron-forge package",
+    "package": "npm run build:assets && electron-forge package",
     "gensources": "node scripts/updateSrc.js"
   },
   "author": "applearon",
@@ -23,6 +26,7 @@
     "@electron/fuses": "^1.8.0",
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",
+    "@tailwindcss/cli": "^4.2.1",
     "autoprefixer": "^10.4.27",
     "electron": "^40.7.0",
     "electron-prebuilt-compile": "^8.2.0",
@@ -35,7 +39,6 @@
     "@logtape/file": "^2.1.1",
     "@logtape/logtape": "^2.1.1",
     "@microsoft/signalr": "^10.0.0",
-    "@tailwindcss/cli": "^4.2.1",
     "electron-squirrel-startup": "^1.0.1",
     "ws": "^8.19.0"
   }

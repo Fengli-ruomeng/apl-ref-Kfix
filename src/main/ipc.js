@@ -54,6 +54,7 @@ function createQueryHandler(getRefereeClient, queryFn) {
 }
 
 function setupIpcHandlers(getRefereeClient) {
+    ipcMain.handle('ResyncRoom', createHandler(getRefereeClient, (client, roomId) => client.resyncRoom(roomId)))
     ipcMain.handle('get-api-data', async () => {
         return [CMDS_SET, EVENTS, version]
     })

@@ -1,7 +1,8 @@
 // ── Theme Toggle ────────────────────────────────────────────────────────────
 
 import { User, Event, EventQueue, Room } from "./models.js"
-import { idFromUsername, osu, logEvent, MODS, addSystemMsg, confirmUI, log } from "./utils.js"
+import { idFromUsername, osu, logEvent, MODS, modsReady, addSystemMsg, showToast, confirmUI, log } from "./utils.js"
+import { buildModChange } from "./mods.js"
 
 window.console.error = (...args) => {
     log.error(args.join(', '))
@@ -35,6 +36,33 @@ window.beatmaps = {}; // global cause like
 
 let Queue;
 let room;
+function installRoomSnapshot(snapshot) {
+    const nextRoom = new Room(snapshot)
+    const nextQueue = new EventQueue(nextRoom)
+
+    Queue?.dispose()
+    room?.dispose()
+    room = nextRoom
+    Queue = nextQueue
+
+    if (countdown_id != null) {
+        clearInterval(countdown_id)
+        countdown_id = null
+    }
+    hideRoomCreation()
+    room.updateUI()
+}
+
+function clearCurrentRoom() {
+    Queue?.dispose()
+    Queue = null
+    room?.close()
+    room = null
+    if (countdown_id != null) {
+        clearInterval(countdown_id)
+        countdown_id = null
+    }
+}
 
 let countdown_id;
 
@@ -69,7 +97,15 @@ async function cmdRunner(room_id, cmd, ...args) {
         "team": async () => {return osu.MoveUser(room_id, {user_id: await ircStyleUsername(args[0]), team: args[1]})},
         "move": async () => {return osu.MoveUser(room_id, {user_id: await ircStyleUsername(args[0]), slot: parseInt(args[1])-1})},
         "map": () => {return osu.EditCurrentPlaylistItem(room_id, {beatmap_id: parseInt(args[0]), ruleset_id: parseInt(args[1]) ?? 0 })},
-        "mods": () => {return osu.EditCurrentPlaylistItem(room_id, handleModChange(args))},
+        "mods": async () => {
+            const modes = await modsReady
+            if (!modes) return {success: false, error: 'Mod metadata could not be loaded'}
+            try {
+                return osu.EditCurrentPlaylistItem(room_id, buildModChange(args, room.mode, modes))
+            } catch (error) {
+                return {success: false, error: error.message}
+            }
+        },
         "allowed_mods": () => {
             let mods = args[0].split("+")
             // this is TECHNICALLY not up to spec of lazer tournament
@@ -98,12 +134,10 @@ async function cmdRunner(room_id, cmd, ...args) {
         "addref": async () => {return osu.AddReferee(room_id, await ircStyleUsername(args[0]))}, // technically needs to be tested
         "removeref": async () => {return osu.RemoveReferee(room_id, await ircStyleUsername(args[0]))},
         "listrefs": () => {return addSystemMsg("Unimplemented")}, // need custom logic
-        "close": () => {
-            osu.CloseRoom(room.id)
-            room.close()
-            room = null
-    
-            document.getElementById("chat-messages").innerHTML = '<div id="no-messages" class="text-gray-500 dark:text-gray-400 text-sm italic">No messages yet...</div>'
+        "close": async () => {
+            const result = await osu.CloseRoom(room_id)
+            if (result.success) clearCurrentRoom()
+            return result
         },
         "help": () => {
             // TODO: add explainations for subcommands
@@ -122,6 +156,7 @@ async function cmdRunner(room_id, cmd, ...args) {
     }
 }
 
+/* moved to mods.js
 function handleModChange(args) {
     const mode = room.mode
     const DA_ORDER = [0,2,3,1,4]
@@ -186,6 +221,7 @@ function handleModChange(args) {
         allowed_mods
     }
 }
+*/
 // this is the old version that uses bancho-style !mp mods
 //function handleModChange(args) {
 //    // this is so stupid
@@ -264,8 +300,9 @@ document.addEventListener('click', (e) => {
 let objs = Object.entries(window.api.on)
 for (const cmd of objs) {
     cmd[1](info => {
-        if (info?.room_id == Queue.room.id) Queue.add(new Event(cmd[0], info))    
-        logEvent(cmd[0], info)
+        if (Queue?.room && info?.room_id == Queue.room.id) Queue.add(new Event(cmd[0], info))
+        const logInfo = info && typeof info === 'object' ? {...info} : info
+        logEvent(cmd[0], logInfo)
     })
 }
 
@@ -445,6 +482,10 @@ document.getElementById('add-playlist-confirm').addEventListener('click', async 
         allowed_mods,
         freestyle
     })
+    if (!result.success) {
+        showToast('Could not add playlist item: ' + result.error, 5000)
+        return
+    }
   
     addPlaylistModal.classList.remove('visible')
     document.getElementById('popup-beatmap-id').value = ''
@@ -491,6 +532,10 @@ document.getElementById('edit-playlist-confirm').addEventListener('click', async
         allowed_mods,
         freestyle
     })
+    if (!result.success) {
+        showToast('Could not edit playlist item: ' + result.error, 5000)
+        return
+    }
   
     editPlaylistModal.classList.remove('visible')
     document.getElementById('popup-beatmap-id').value = ''
@@ -600,21 +645,34 @@ document.getElementById('make-room-btn').addEventListener('click', async () => {
         max_participants: Object.is(int('make-room-max-participants'), NaN) ? 0 : int('make-room-max-participants')
     })
     if (result.success && result.data) {
-        room = new Room(result.data)
-        Queue = new EventQueue(room)
-        hideRoomCreation()
-        room.updateUI()
+        installRoomSnapshot(result.data)
     }
 })
 
 document.getElementById('join-room-btn').addEventListener('click', async () => {
     const roomId = int('join-room-id')
     const result = await osu.JoinRoom(roomId)
-    if (result.success) {
-        room = new Room(result.data)
-        Queue = new EventQueue(room)
-        hideRoomCreation()
-        room.updateUI()
+    if (result.success && result.data) {
+        installRoomSnapshot(result.data)
+    }
+})
+
+document.getElementById('refresh-room-btn').addEventListener('click', async e => {
+    if (!room) return
+    const button = e.currentTarget
+    const roomId = room.id
+    button.disabled = true
+    button.textContent = 'Syncing…'
+    try {
+        const result = await window.api.ResyncRoom(roomId)
+        if (!result.success) throw new Error(result.error)
+        installRoomSnapshot(result.data)
+        showToast('Room resynced')
+    } catch (err) {
+        showToast('Resync failed: ' + err.message, 5000)
+    } finally {
+        button.disabled = false
+        button.textContent = '↻ Resync'
     }
 })
 
@@ -666,9 +724,9 @@ document.getElementById('close-room-btn').addEventListener('click', async () => 
     if (!ok) return
     const result = await osu.CloseRoom(room.id)
     if (result.success) {
-        room.close()
+        clearCurrentRoom()
     } else {
-        console.log("How the hell")
+        showToast('Could not close room: ' + result.error, 5000)
     }
 })
 
@@ -721,7 +779,7 @@ function commandHandler(message) {
 
 // ── Event listeners ────────────────────────────────────────────────────────
 window.api.on.MatchCompleted(info => {
-    addScore(room.id, info.playlist_item_id)
+    if (room?.id && info?.room_id == room.id) addScore(room.id, info.playlist_item_id)
 })
 
 window.api.api.onChatMessage(async buffer => {

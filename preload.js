@@ -19,6 +19,7 @@ ipcRenderer.invoke('get-api-data').then(API_DATA => {
         send: api,
     
         GetConnectionStatus: () => ipcRenderer.invoke('GetConnectionStatus'),
+        ResyncRoom: (roomId) => ipcRenderer.invoke('ResyncRoom', roomId),
         api: { // calls to the osu api the normal way
             onChatMessage :(callback) => {
                 ipcRenderer.on('chat-event', (event, buffer) => callback(buffer))

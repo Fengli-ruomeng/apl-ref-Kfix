@@ -14,6 +14,7 @@ class RefereeClient {
         this.accessToken = accessToken
         this.sendToRenderer = sendToRenderer
         this.ws_close = ws_close
+        this.resyncingRoom = false
     }
 
     async connect() {
@@ -51,6 +52,17 @@ class RefereeClient {
         if (this.connection) {
             await this.connection.stop()
             this.connected = false
+        }
+    }
+    async resyncRoom(roomId) {
+        if (this.resyncingRoom) throw new Error('Room resync already in progress')
+        this.resyncingRoom = true
+        try {
+            await this.disconnect()
+            await this.connect()
+            return await this.JoinRoom(roomId)
+        } finally {
+            this.resyncingRoom = false
         }
     }
 }

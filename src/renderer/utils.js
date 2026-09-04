@@ -116,8 +116,22 @@ for (const cmd of objs) {
     }
 }
 let MODS;
-fetch('mods.json').then(mod_res => {
-    mod_res.json().then(mods => MODS = mods)
-})
+const modsReady = fetch('mods.json')
+    .then(response => {
+        if (!response.ok && response.status !== 0) {
+            throw new Error(`Could not load mods.json: HTTP ${response.status}`)
+        }
+        return response.json()
+    })
+    .then(modes => {
+        if (!Array.isArray(modes)) throw new Error('mods.json has an invalid format')
+        MODS = modes
+        return modes
+    })
+    .catch(error => {
+        console.error('Could not load mod metadata:', error)
+        log.error('Could not load mod metadata: ' + error.message)
+        return null
+    })
 
-export { osu, MODS, log }
+export { osu, MODS, modsReady, log }

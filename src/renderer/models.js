@@ -25,6 +25,7 @@ export class User {
 export class Room {
     // stores all information about a room
     constructor(resp) { // RoomJoinedResponse data 
+        this.disposed = false
         this.id = resp.room_id 
         this.chat_channel_id = resp.chat_channel_id
         this.name = resp.name
@@ -41,12 +42,14 @@ export class Room {
 
         for (const ref of resp.referees) {
             this.GetUser(ref.user_id).then(() => {
+                if (this.disposed) return
                 this.updateUI()
                 //this.refs[ref.user_id] = u
             })
         }
         for (const p of resp.players) {
             this.GetUser(p.user_id, true).then(() => {
+                if (this.disposed) return
                 this.players[p.user_id].team = p.team
                 this.players[p.user_id].mods = p.mods
                 this.players[p.user_id].status = p.status
@@ -68,7 +71,10 @@ export class Room {
         this.#showRoomActions()
     }
     updateMode() {
-        this.mode = Object.values(this.playlistItems).find(x => x.order==0).ruleset_id ?? 0
+        const currentItem = Object.values(this.playlistItems).find(x => x.order == 0)
+        if (currentItem) this.mode = currentItem.ruleset_id ?? 0
+        if (this.mode == null) this.mode = 0
+        return this.mode
     }
     async GetUser(user_id, normal) {
         normal = normal ?? false
@@ -94,14 +100,14 @@ export class Room {
         document.getElementById('navbar-room-controls').classList.add('visible')
 
         document.getElementById('add-referee').classList.add('visible')
-        document.getElementById('room-badge').addEventListener('click', () => {
+        document.getElementById('room-badge').onclick = () => {
             try {
                 navigator.clipboard.writeText("https://osu.ppy.sh/multiplayer/rooms/" + this.id)
                 showToast("Copied to clipboard!")
             } catch {
                 showToast("Failed to copy. idk what happened")
             }
-        })
+        }
         document.getElementById('room-chat-id').textContent = this.chat_channel_id
         document.getElementById('room-name').textContent = this.name
     }
@@ -209,28 +215,33 @@ export class Room {
 
         document.getElementById("playlist-items").appendChild(clone)
         const beatmap = await GetBeatmap(beatmap_id)
-        document.querySelector(`[class~="${playlist_id}"]`).querySelector('.playlist-item-id').textContent = beatmap.beatmapset.title + ` [${beatmap.version}]`
+        if (this.disposed) return
+        const playlistItem = document.querySelector(`[class~="${playlist_id}"]`)
+        if (playlistItem) playlistItem.querySelector('.playlist-item-id').textContent = beatmap.beatmapset.title + ` [${beatmap.version}]`
     }
     #addModSettingUI(mod_list, mod, mod_template) {
         let empty = true
+        const settings = Object.entries(mod.settings ?? {})
+        if (settings.length === 0) return {empty, undefault_settings: false}
+
         const mod_clone = mod_template.content.cloneNode(true);
         const settings_div = mod_clone.querySelector(".mod-item")
         let mod_name = settings_div.querySelector(".mod-item-name")
         let mod_settings = settings_div.querySelector(".mod-item-settings")
-        const mod_info = MODS[this.mode].Mods.find(x => x.Acronym == mod.acronym)
+        const mod_info = MODS?.[this.mode]?.Mods?.find(x => x.Acronym == mod.acronym)
         // settings is in the form of {option: number|string|boolean} im pretty sure
         let settings_text = []
-        for (const setting of Object.entries(mod.settings)) {
+        for (const setting of settings) {
             // MODS()[0].Mods.find(x => x.Acronym == "DA").Settings.find(x => x.Name == "circle_size").Label
-            let label = mod_info.Settings.find(x => x.Name == setting[0]).Label;
+            let label = mod_info?.Settings?.find(x => x.Name == setting[0])?.Label ?? setting[0];
             settings_text.push(`${label}:${setting[1]}`)
         }
         settings_text = settings_text.join(", ")
-        const undefault_settings = mod.settings != null && Object.entries(mod.settings).length != 0
+        const undefault_settings = settings.length != 0
         if (undefault_settings) {
             empty = false
             
-            mod_name.textContent = mod_info.Name
+            mod_name.textContent = mod_info?.Name ?? mod.acronym
             mod_settings.textContent = settings_text
         }
         if (undefault_settings) mod_list.appendChild(mod_clone)
@@ -238,6 +249,7 @@ export class Room {
     }
     async #addVerboseMods(user_id, mods) {
         let user = await this.GetUser(user_id, true)
+        if (this.disposed) return
         const verboseMods = document.getElementById("mods-verbose-container");
         const cur = verboseMods.querySelector(`[data-user_id="${user_id}"]`)
         const template = document.getElementById("player-mods-verbose");
@@ -263,6 +275,7 @@ export class Room {
     }
 
     updateUI() {
+        if (this.disposed) return
 
         // Players
         console.log("Updating UI")
@@ -314,7 +327,11 @@ export class Room {
         // Match Status
         document.getElementById('cur-match-status').textContent = this.status
     }
+    dispose() {
+        this.disposed = true
+    }
     close() {
+        this.dispose()
         document.getElementById("playlist-items").innerHTML = ""
         const req_mods_div = document.getElementById('req-verbose-mods')
         req_mods_div.querySelector(".mods-list").innerHTML = ""
@@ -340,16 +357,35 @@ export class EventQueue {
         this.room = room
         this.arr = [] // array of Event
         this.processing = false
+        this.active = true
+        this.currentEvent = null
     }
     add(ev) {
+        if (!this.active) return
         this.arr.push(ev)
-        if (!this.processing) this.#queueLoop()
+        if (!this.processing) this.#runQueue()
+    }
+
+    dispose() {
+        this.active = false
+        this.arr.length = 0
+    }
+
+    #runQueue() {
+        this.#queueLoop()
+            .catch(err => console.error(`Failed to process ${this.currentEvent?.name}: ${err?.stack ?? err}`))
+            .finally(() => {
+                this.processing = false
+                this.currentEvent = null
+                if (this.active && this.arr.length > 0) this.#runQueue()
+            })
     }
 
     async #queueLoop() { // TODO maybe add a flag for if we want to update UI
-        this.processing = true;
-        while (this.arr.length > 0) {
+        this.processing = true
+        while (this.active && this.arr.length > 0) {
             const ev = this.arr.shift()
+            this.currentEvent = ev
             const data = ev.data
             switch (ev.name) {
             case "UserJoined": {
@@ -366,8 +402,8 @@ export class EventQueue {
             } break;
             case "UserKicked": {
                 if (data.kicked_user_id == window.me.id) {
-                    this.close()
-                    // TODO: make sure this works
+                    this.room.close()
+                    this.dispose()
                 }
                 delete this.room.players[data.kicked_user_id]
                 if (!this.room.max_participants) this.room.player_slots = this.room.player_slots.filter(x => x != data.kicked_user_id)
@@ -395,9 +431,11 @@ export class EventQueue {
                 if (data.playlist_item.was_played) {
                     delete this.room.playlistItems[data.playlist_item.id]
                 } else {
-                    Object.keys(data.playlist_item).forEach(key => {
-                        this.room.playlistItems[data.playlist_item.id][key] = data.playlist_item[key]
-                    })
+                    const existing = this.room.playlistItems[data.playlist_item.id] ?? {}
+                    this.room.playlistItems[data.playlist_item.id] = {
+                        ...existing,
+                        ...data.playlist_item
+                    }
                 }
             } break;
             case "PlaylistItemRemoved": {
@@ -444,6 +482,5 @@ export class EventQueue {
             this.room.updateMode()
             this.room.updateUI()
         }
-        this.processing = false;
     }
 }

@@ -1,4 +1,4 @@
-name: Node.js CI
+name: Desktop packages
 
 on:
   push:
@@ -7,14 +7,38 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: ${{ matrix.platform }}-${{ matrix.arch }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-2022
+        include:
+          - os: windows-2022
+            platform: win32
+            arch: x64
+          - os: windows-2022
+            platform: win32
+            arch: ia32
+          - os: windows-11-arm
+            platform: win32
+            arch: arm64
+          - os: ubuntu-22.04
+            platform: linux
+            arch: x64
+          - os: ubuntu-22.04-arm
+            platform: linux
+            arch: arm64
+          - os: macos-15-intel
+            platform: darwin
+            arch: x64
+          - os: macos-14
+            platform: darwin
+            arch: arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -30,18 +54,52 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          # The legacy electron-prebuilt-compile dependency also installs Electron 8,
+          # which has no Apple Silicon build. Only download the current runtime.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
-      - name: Compile tailwind css
-        run:  npx @tailwindcss/cli -i ./src/renderer/css/tailwind-input.css -o ./src/renderer/css/tailwind.css
-      - name: Generate sources
-        run: npm run gensources
+      - name: Install current Electron runtime
+        run: node node_modules/electron/install.js
 
-      - name: Build packages
-        run: npm run make
+      - name: Build assets
+        run: npm run build:assets
+
+      - name: Create macOS icon
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          iconset="$RUNNER_TEMP/aplreflogo.iconset"
+          mkdir -p "$iconset"
+          for size in 16 32 128 256 512; do
+            sips -z "$size" "$size" assets/aplreflogo.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
+            double=$((size * 2))
+            sips -z "$double" "$double" assets/aplreflogo.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+          done
+          iconutil -c icns "$iconset" -o assets/aplreflogo.icns
+
+      - name: Package application
+        run: npx electron-forge package --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+
+      - name: Apply and verify macOS ad-hoc signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="out/apl_ref-darwin-${{ matrix.arch }}/apl_ref.app"
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+
+      - name: Verify packaged version, architecture and assets
+        run: node scripts/verifyPackage.js ${{ matrix.platform }} ${{ matrix.arch }}
+
+      - name: Create distribution ZIP
+        run: npx electron-forge make --skip-package --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: apl-ref-${{ matrix.os }}
+          name: apl-ref-${{ matrix.platform }}-${{ matrix.arch }}
           path: out/make/**
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

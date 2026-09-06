@@ -274,6 +274,17 @@ export class Room {
         if (cur == null) verboseMods.appendChild(clone)
     }
 
+    async #addPlayerStyle(user_id, style) {
+        const cur = Object.values(this.playlistItems).find(x => x.order == 0)
+        if (!cur?.freestyle) return // only matters with freestyle
+        const beatmap_id = style?.beatmap_id ?? cur.beatmap_id // null = item default
+        if (!beatmap_id) return
+        const beatmap = await GetBeatmap(beatmap_id)
+        if (this.disposed) return
+        const styleDiv = document.querySelector(`[data-user_id="${user_id}"] .player-style`)
+        if (styleDiv) styleDiv.textContent = `[${beatmap.version}] ${beatmap.difficulty_rating.toFixed(2)}★`
+    }
+
     updateUI() {
         if (this.disposed) return
 
@@ -292,6 +303,7 @@ export class Room {
                 let mod_str = player.mods.map(item => item.acronym).join(" ")
                 playerDiv.querySelector(".player-mods").textContent = mod_str ? mod_str : "N/A"
                 this.#addVerboseMods(player.id, player.mods)
+                this.#addPlayerStyle(player.id, player.style)
             }
         }
 
@@ -454,6 +466,9 @@ export class EventQueue {
             case "UserStyleChanged": {
                 // yeah i continue to question your sanity
                 // if you need this for your tournament
+                const player = this.room.players[data.user_id]
+                // flat here, nested on join
+                if (player) player.style = { beatmap_id: data.beatmap_id, ruleset_id: data.ruleset_id }
             } break;
             case "UserTeamChanged": {
                 this.room.players[data.user_id].team = data.team

@@ -1,6 +1,7 @@
 const { app, ipcMain } = require('electron')
 const fs = require('fs')
 const path = require('path')
+const { fetchJson } = require('./main/http')
 
 const userDataPath = app.getPath('userData');
 
@@ -19,7 +20,7 @@ const OAUTH_SCOPES = 'public identify multiplayer.write_manage chat.read chat.wr
 
 function readConfig() {
     try {
-        if (!fs.existsSync(TOKEN_PATH)) return null
+        if (!fs.existsSync(CONFIG_PATH)) return null
         const raw = fs.readFileSync(CONFIG_PATH, 'utf8')
         const config = JSON.parse(raw)
         if (!config.client_id || !config.client_secret) {
@@ -208,8 +209,36 @@ async function getAccessToken(createLoginWindow, createConfigPopup) {
         return saved.access_token
     }
 
+    if (saved?.refresh_token) {
+        try { return await refreshAccessToken() }
+        catch { console.warn('Saved session could not be refreshed; sign-in is required') }
+    }
+
     console.log('No valid token found, starting OAuth flow')
     return await startOAuthFlow(createLoginWindow, createConfigPopup)
 }
 
-module.exports = { getAccessToken, readConfig, readToken, saveToken, isTokenValid }
+let refreshInFlight = null
+async function refreshAccessToken() {
+    const saved = readToken()
+    if (isTokenValid(saved)) return saved.access_token
+    if (refreshInFlight) return refreshInFlight
+    refreshInFlight = (async () => {
+        const config = readConfig()
+        if (!saved?.refresh_token || !config) throw new Error('Session expired. Restart APL Ref to sign in again.')
+        try {
+            // Omitting scope preserves the existing grants (osu! OAuth docs).
+            const body = new URLSearchParams({ client_id: String(config.client_id), client_secret: config.client_secret,
+                grant_type: 'refresh_token', refresh_token: saved.refresh_token })
+            const token = await fetchJson(OSU_TOKEN_URL, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() })
+            if (!token?.access_token) throw new Error('No access token was returned')
+            saveToken({ ...token, refresh_token: token.refresh_token || saved.refresh_token })
+            return token.access_token
+        } catch {
+            throw new Error('Could not refresh the session. Check the connection, or restart APL Ref to sign in again.')
+        }
+    })()
+    try { return await refreshInFlight } finally { refreshInFlight = null }
+}
+
+module.exports = { getAccessToken, refreshAccessToken, readConfig, readToken, saveToken, isTokenValid }

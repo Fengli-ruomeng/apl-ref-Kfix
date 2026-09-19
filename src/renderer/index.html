@@ -1,446 +1,320 @@
 <!DOCTYPE html>
-<html class="dark">
+<html lang="en" class="dark" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>APL Ref Client</title>
-    <link rel="stylesheet" href="css/tailwind.css" />
     <script>
-      // Default to dark theme
-      document.documentElement.classList.add('dark');
+      // theme before first paint (defaults to dark)
+      (function () {
+        var t = 'dark';
+        try { t = localStorage.getItem('theme') || t; } catch (e) {}
+        var root = document.documentElement;
+        root.classList.remove('dark', 'light'); root.classList.add(t); root.setAttribute('data-theme', t);
+      })();
     </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/tailwind.css" />
   </head>
-  <body class="scrollbar-hover bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100">
+  <body>
+<div id="app" class="h-full flex flex-col">
 
-    <!-- Left Sidebar -->
-    <div id="room-sidebar" class="scrollbar-hover bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-200 flex flex-col">
-      <div class="sidebar-section grow overflow-y-auto scrollbar-hover"> 
-        <h3 class="sidebar-title">
-          Players
-          <button id="invite-player-btn" class="leading-none py-0.5 px-3 ml-2 rounded bg-blue-500 text-white border-none cursor-pointer hover:bg-blue-600">+</button>
-          <button id="toggle-lock-btn" class="leading-none py-0.5 px-2 ml-2 rounded bg-blue-500 text-white border-none cursor-pointer hover:bg-blue-600">Unlocked</button>
-        </h3>
-        <div class="player-list" id="player-list">
-        </div>
-      </div>
-
-      <div class="sidebar-section flex-none">
-        <h3 class="sidebar-title">Match Control</h3>
-        
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Countdown seconds (0 = immediate)</label>
-          <input id="start-match-seconds" type="number" value="0" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 text-sm" />
-        </div>
-        <div class="grid grid-cols-2 gap-2 mb-2">
-          <button id="timer-btn" class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-sm">Start Timer</button>
-          <button id="stop-countdown-btn" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded text-sm">Stop Timer</button>
-
-          <button id="start-match-btn" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">Start Match</button>
-          <button id="abort-match-btn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm">Abort Match</button>
-
-        </div>
-      </div>
+  <!-- ── top bar ─────────────────────────────────────────────────── -->
+  <header id="topbar" class="h-12 shrink-0 flex items-center gap-2 px-3 border-b border-line bg-surface-1 relative z-20">
+    <div class="flex items-center gap-2 mr-1 shrink-0">
+      <div class="size-6 bg-accent grid place-items-center text-white font-bold text-[11px] tracking-tight">R</div>
+      <span class="font-semibold text-sm hidden sm:inline">apl!ref</span>
     </div>
 
-    <!-- Rightbar -->
-    <div id="room-rightbar" class="fixed top-14 right-0 w-[var(--rightbar-width)] h-[calc(100vh-56px)] grid grid-rows-8 bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-200 border-l border-gray-200">
-      <div class="sidebar-section overflow-y-auto scrollbar-hover row-span-3">
-        <h3 class="sidebar-title">
-          Map Queue
-          <button id="add-playlist-btn" class="leading-none py-0.5 px-3 ml-2 rounded bg-blue-500 text-white border-none cursor-pointer hover:bg-blue-600">+</button>
-        </h3>
-        <div id="playlist-items" class="playlist-items"></div>
-      </div>
-      <div class="p-4 flex-1 overflow-y-auto padding-16 scrollbar-hover border-t border-gray-300 row-span-3">
-        <h3 class="sidebar-title">Mod Settings</h3>
-        <div class="bg-gray-100 dark:bg-gray-700 p-3 rounded text-sm mb-2" id="req-verbose-mods">
-          <div class="mods-user font-semibold text-gray-900 dark:text-gray-50 mb-3">Current Map</div>
-          <div class="mods-list flex flex-col gap-2"></div>
-        </div>
-        <div class="" id="mods-verbose-container">
-        </div>
-      </div>
-      <div class="p-4 flex-2 overflow-y-auto border-t border-gray-300 scrollbar-hover row-span-2">
-          <h3 class="sidebar-title">Events</h3>
-          <div class="event-log" id="event-log">
-            <div class="event-placeholder">No events yet…</div>
-          </div>
-      </div>
-      <div id="debug-menu" class="bg-white dark:bg-gray-800 rounded-lg shadow p-5 mb-4">
-        <h2 class="text-lg font-medium mb-3">Debug</h2>
-        <div class="action-row">
-          <button id="ping-btn" class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-4 py-2 rounded text-sm text-gray-800 dark:text-gray-100">Send Ping</button>
-          <span class="result-msg" id="ping-result"></span>
-        </div>
-      </div>
+    <div class="room-only flex items-center gap-1.5 min-w-0 flex-1">
+      <span class="w-px h-5 bg-line mx-1"></span>
+      <button id="tb-room-name" class="btn btn-ghost h-8 px-2 font-semibold text-sm max-w-[38vw] truncate block" title="Room settings"></button>
+      <button id="tb-ids" class="btn btn-ghost h-7 px-2 font-mono text-[11px] text-muted gap-1.5" title="Copy room link">
+        <span>#<span id="tb-id"></span></span><span class="opacity-40">·</span><span>chat <span id="tb-chat"></span></span><i data-icon="link" data-icon-class="icon-sm"></i>
+      </button>
+      <span id="tb-locked" class="chip chip-warn" hidden><i data-icon="lock" data-icon-class="icon-sm"></i>teams locked</span>
     </div>
-    <!-- Navbar -->
-    <div id="toast" class="hidden fixed top-10 left-4 px-4 py-2 rounded shadow-lg bg-gray-800 text-white"></div>       
-    <div id="navbar" class="bg-pink-600">
-      <h5 id="room-name"  class="text-base font-normal whitespace-nowrap m-0">APL Ref Client</h5>
-      <div id="room-badge" class="room-badge cursor-pointer bg-pink-800 hover:bg-pink-900">
-        Copy Room link
-      </div>
-      <div id="room-chat-badge" class="room-badge bg-pink-800">
-        <span>Chat ID:</span>
-        <strong id="room-chat-id"></strong>
-      </div>
-      <div id="add-referee" class="text-white bg-green-600 hover:bg-green-700 rounded px-3 py-1 text-sm cursor-pointer border-0 h-8 whitespace-nowrap flex items-center">Add Referee</div>
-      <div class="navbar-spacer"></div>
-      <div id="navbar-room-controls">
-        <button id="refresh-room-btn" title="Reconnect and reload room state" class="text-white bg-black/15 hover:bg-black/25 rounded px-3 py-1 text-sm cursor-pointer border-0 h-8 whitespace-nowrap flex items-center">↻ Resync</button>
-        <button id="settings-trigger" class="text-white bg-black/15 hover:bg-black/25 rounded px-3 py-1 text-sm cursor-pointer border-0 h-8 whitespace-nowrap flex items-center">⚙ Settings</button>
-        <button id="close-room-btn" class="text-white bg-red-700 hover:bg-red-800 rounded px-3 py-1 text-sm cursor-pointer border-0 h-8 whitespace-nowrap flex items-center">Close Room</button>
-      </div>
-      <button id="theme-toggle" class="text-white bg-black/15 hover:bg-black/25 rounded px-3 py-1 text-sm cursor-pointer border-0 h-8 whitespace-nowrap flex items-center">☀️</button>
+    <div class="not-room flex-1" hidden></div>
 
-      <div class="status-chip">
-        <div class="status-dot" id="status-dot"></div>
-        <span id="status-text">Connecting…</span>
-      </div>
-    <!-- Settings dropdown -->
-    <div id="settings-dropdown" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-      <div class="dropdown-title">Room Settings</div>
-      <div class="px-4 py-2">
-        <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Room Name</label>
-        <input id="settings-name" type="text" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-      </div>
-      <div class="px-4 py-2">
-        <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Room Password</label>
-        <input id="settings-password" type="text" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-      </div>
-      <div class="px-4 py-2">
-        <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Maximum Participants</label>
-        <input id="settings-maximum-participants" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-      </div>
-      <div class="px-4 py-2">
-        <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Match Type</label>
-        <div class="flex gap-4">
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <input type="radio" name="match_type" value="0" checked />
-            Head-To-Head
-          </label>
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <input type="radio" name="match_type" value="1" />
-            Team Versus
-          </label>
+    <div class="flex items-center gap-1 shrink-0">
+      <div id="tb-conn" class="flex items-center gap-2 text-xs text-muted px-2" data-on="true"><span class="conn-dot"></span><span id="tb-conn-text" class="hidden md:inline">Connecting…</span></div>
+      <button id="tb-queue" class="room-only btn btn-icon btn-ghost xl:hidden" title="Map queue"><i data-icon="panel"></i></button>
+      <button id="tb-resync" class="room-only btn btn-ghost" title="Reconnect and reload room state"><i data-icon="refresh"></i><span class="hidden xl:inline">Resync</span></button>
+      <button id="tb-settings" class="room-only btn btn-ghost" title="Room settings"><i data-icon="sliders"></i><span class="hidden xl:inline">Settings</span></button>
+      <div class="room-only relative">
+        <button id="tb-more" class="btn btn-icon btn-ghost" title="More"><i data-icon="more"></i></button>
+        <div id="menu-more" class="menu" hidden>
+          <button data-act="addref"><i data-icon="shield" data-icon-class="icon-sm"></i>Add referee</button>
+          <button data-act="copy"><i data-icon="link" data-icon-class="icon-sm"></i>Copy room link</button>
+          <hr>
+          <button data-act="close" class="danger"><i data-icon="x" data-icon-class="icon-sm"></i>Close room</button>
         </div>
       </div>
-      <div class="dropdown-actions">
-        <button id="change-settings-btn" class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1 rounded text-sm">Apply</button>
-        <span class="result-msg" id="change-settings-result"></span>
+      <div id="tb-sim-wrap" class="relative" hidden>
+        <span class="w-px h-5 bg-line mx-1 inline-block align-middle"></span>
+        <button id="tb-sim" class="btn btn-sm h-8 px-2.5 gap-1.5 text-accent bg-accent/10 hover:bg-accent/20 border-accent/25" title="Mock mode: trigger simulated events"><span class="size-1.5 bg-accent"></span>Simulate<i data-icon="chevron" data-icon-class="icon-sm"></i></button>
+        <div id="menu-sim" class="menu" hidden>
+          <div class="menu-title">Mock · simulated events</div>
+          <div class="sim-grid">
+            <button data-sim="join">Player joins</button><button data-sim="leave">Player leaves</button>
+            <button data-sim="ready">Toggle a ready</button><button data-sim="allready">Everyone ready</button>
+            <button data-sim="chat">Incoming chat</button><button data-sim="mods">Player changes mods</button>
+          </div>
+        </div>
       </div>
+      <button id="tb-theme" class="btn btn-icon btn-ghost" title="Toggle theme"></button>
     </div>
-    </div>
+  </header>
+  <div id="conn-banner" hidden>Connection to the referee server was lost. Reconnecting…</div>
 
-    <!-- Confirmation modal -->
-    <div id="confirm-modal">
-      <div class="modal-content bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-        <h5 id="confirm-title" class="text-lg font-medium mb-2 text-gray-800 dark:text-gray-100">Are you sure?</h5>
-        <p id="confirm-body" class="text-gray-600 dark:text-gray-400 mb-4"></p>
-        <div class="modal-footer">
-          <button id="confirm-cancel" class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-4 py-2 rounded text-sm text-gray-800 dark:text-gray-100">Cancel</button>
-          <button id="confirm-ok" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm">Confirm</button>
-        </div>
+  <!-- ── room view ───────────────────────────────────────────────── -->
+  <div id="view-room" class="flex-1 min-h-0 grid grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[272px_minmax(0,1fr)_320px] 2xl:grid-cols-[300px_minmax(0,1fr)_360px]" hidden>
+
+    <aside id="col-players" class="min-h-0 flex flex-col border-r border-line bg-surface-1">
+      <div class="h-10 shrink-0 flex items-center gap-2 px-3 border-b border-line">
+        <span class="panel-title">Players</span><span id="player-count" class="font-mono text-[11px] text-muted"></span>
+        <div class="flex-1"></div>
+        <button id="btn-size" class="btn btn-sm btn-ghost font-mono text-[11px]" title="Change room size">size</button>
+        <button id="btn-lock" class="btn btn-icon btn-sm btn-ghost" title="Lock teams and slots"></button>
+        <button id="btn-invite" class="btn btn-icon btn-sm btn-ghost" title="Invite player"><i data-icon="userplus" data-icon-class="icon-sm"></i></button>
       </div>
-    </div>
-
-    <!-- Add Playlist Item modal -->
-    <div id="add-playlist-modal">
-      <div class="modal-content bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-        <h5 class="text-lg font-medium mb-2 text-gray-800 dark:text-gray-100">Add Playlist Item</h5>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Beatmap ID</label>
-          <input id="popup-beatmap-id" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-        </div>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Ruleset ID (optional)</label>
-          <input id="popup-ruleset-id" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-        </div>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Required Mods (space-separated)</label>
-          <input id="popup-required-mods" type="text" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-        </div>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Allowed Mods (space-separated)</label>
-          <input id="popup-allowed-mods" type="text" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-        </div>
-        <div class="mb-3">
-          <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-            <input id="popup-freestyle" type="checkbox" class="rounded" />
-            Freestyle
-          </label>
-        </div>
-        <div class="modal-footer">
-          <button id="add-playlist-cancel" class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-4 py-2 rounded text-sm text-gray-800 dark:text-gray-100">Cancel</button>
-          <button id="add-playlist-confirm" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Add</button>
-        </div>
+      <div id="player-list" class="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col gap-1"></div>
+      <div class="shrink-0 border-t border-line p-2">
+        <div class="flex items-center gap-2 px-1 mb-1.5"><span class="panel-title">Referees</span><div class="flex-1"></div><button id="btn-addref" class="btn btn-icon btn-sm btn-ghost" title="Add referee"><i data-icon="plus" data-icon-class="icon-sm"></i></button></div>
+        <div id="ref-list" class="flex flex-wrap gap-1"></div>
       </div>
-    </div>
+    </aside>
 
-    <!-- Edit Playlist Item modal -->
-    <div id="edit-playlist-modal">
-      <div class="modal-content bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-        <div class="flex items-center justify-between mb-2">
-          <div>
-            <h5 class="text-lg font-medium text-gray-800 dark:text-gray-100">Edit Playlist Item</h5>
-            <span class="result-msg text-sm" id="edit-playlist-result"></span>
+    <main id="col-center" class="min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
+      <section id="match" class="card p-3 flex flex-col gap-3 shrink-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <div id="state" class="state" data-s="idle">
+            <span class="dot"></span>
+            <svg class="ring" viewBox="0 0 24 24" hidden><circle class="bg" cx="12" cy="12" r="9"></circle><circle class="fg" cx="12" cy="12" r="9"></circle></svg>
+            <span id="state-text">Idle</span>
           </div>
-          <button id="edit-playlist-remove" class="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Remove</button>
-        </div>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Beatmap ID</label>
-          <input id="popup-edit-beatmap-id" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-        </div>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Ruleset ID (optional)</label>
-          <input id="popup-edit-ruleset-id" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-        </div>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Required Mods (space-separated)</label>
-          <input id="popup-edit-required-mods" type="text" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-        </div>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Allowed Mods (space-separated)</label>
-          <input id="popup-edit-allowed-mods" type="text" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-        </div>
-        <div class="mb-3">
-          <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-            <input id="popup-edit-freestyle" type="checkbox" class="rounded" />
-            Freestyle
-          </label>
-        </div>
-        <div class="modal-footer">
-          <button id="edit-playlist-cancel" class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-4 py-2 rounded text-sm text-gray-800 dark:text-gray-100">Cancel</button>
-          <button id="edit-playlist-confirm" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Save</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Invite Player modal -->
-    <div id="invite-player-modal">
-      <div class="modal-content bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-        <h5 class="text-lg font-medium mb-2 text-gray-800 dark:text-gray-100">Invite Player <span class="result-msg" id="invite-player-result"></span></h5>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Username (optional)</label>
-          <input id="popup-invite-username" type="text" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" placeholder="" />
-        </div>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">User ID (optional)</label>
-          <input id="popup-invite-userid" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" placeholder="" />
-        </div>
-        <div class="modal-footer">
-          <button id="invite-player-cancel" class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-4 py-2 rounded text-sm text-gray-800 dark:text-gray-100">Cancel</button>
-          <button id="invite-player-confirm" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Invite</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Invite Ref Modal -->
-    <div id="invite-ref-modal">
-      <div class="modal-content bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-        <h5 class="text-lg font-medium mb-2 text-gray-800 dark:text-gray-100">Invite Referee<span class="result-msg" id="invite-ref-result"></span></h5>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Username (optional)</label>
-          <input id="ref-invite-username" type="text" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" placeholder="" />
-        </div>
-        <div class="mb-3">
-          <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">User ID (optional)</label>
-          <input id="ref-invite-userid" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" placeholder="" />
-        </div>
-        <div class="modal-footer">
-          <button id="invite-ref-cancel" class="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-4 py-2 rounded text-sm text-gray-800 dark:text-gray-100">Cancel</button>
-          <button id="invite-ref-confirm" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Invite</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- Page content -->
-    <div class="container px-4 py-4 pt-14 with-sidebar">
-
-      <!-- Room Setup -->
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-5 mb-4" id="room-setup">
-        <h2 class="text-lg font-medium mb-3">Room Setup</h2>
-
-        <p class="text-gray-600 dark:text-gray-400 text-sm mb-2">Make Room</p>
-        <div class="flex flex-wrap gap-3 mb-3">
-          <div class="w-full md:w-1/3">
-            <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Ruleset ID</label>
-            <input id="make-ruleset-id" type="number" value="0" placeholder="0=osu! 1=taiko 2=catch 3=mania" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
+          <div id="timer-chip" class="state" data-s="timer" hidden>
+            <i data-icon="timer" data-icon-class="icon-sm"></i><span class="num" id="timer-text">0:00</span>
+            <button id="timer-stop" class="stop" title="Stop timer"><i data-icon="x" data-icon-class="icon-sm"></i></button>
           </div>
-          <div class="w-full md:w-1/3">
-            <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Beatmap ID</label>
-            <input value="2626718" id="make-beatmap-id" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-          </div>
-          <div class="w-full md:w-1/3">
-            <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Room Name</label>
-            <input id="make-room-name" type="text" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-          </div>
-          <div class="w-full md:w-1/3">
-            <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Maximum participants (optional)</label>
-            <input id="make-room-max-participants" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-          </div>
-        </div>
-        <div class="action-row">
-          <button id="make-room-btn" class="bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded">Make Room</button>
-          <span class="result-msg" id="make-room-result"></span>
-        </div>
-
-        <hr class="section-divider" />
-
-        <p class="text-gray-600 dark:text-gray-400 text-sm mb-2">Join Room</p>
-        <div class="flex flex-wrap gap-3 mb-3">
-          <div class="w-full md:w-1/3">
-            <label class="text-sm text-gray-600 dark:text-gray-400 block mb-1">Room ID</label>
-            <input id="join-room-id" type="number" class="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" />
-          </div>
-        </div>
-        <div class="action-row">
-          <button id="join-room-btn" class="bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded">Join Room</button>
-          <span class="result-msg" id="join-room-result"></span>
-        </div>
-      </div>
-
-      <!-- Room actions -->
-      <div id="room-actions" class="hidden">
-
-        <!-- Chat -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-5 mb-4">
-          <div class="grid grid-cols-2 grid-rows-1">
-            <h2 class="text-lg font-medium mb-3">Chat</h2>
-            <div class="justify-self-end">
-            <span class="label p-1/2">Status:</span>
-            <span class="value status-idle" id="cur-match-status">Idle</span>
-          </div>
-          </div>
-          <div id="chat-messages" class="scrollbar-hover h-128 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded p-2 mb-3 bg-gray-50 dark:bg-gray-700">
-            <div id="no-messages" class="text-gray-500 dark:text-gray-400 text-sm italic">No messages yet...</div>
-          </div>
-          <div class="flex gap-2">
-            <input id="chat-input" type="text" class="flex-1 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" placeholder="Type a message..." />
-            <button id="chat-send-btn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm">Send</button>
-          </div>
-      </div>
-
-      <!-- Scores -->
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-5 mb-4">
-          <div class="grid grid-cols-2 grid-rows-1">
-            <h2 class="text-lg font-medium mb-3">Scores</h2>
-            <div class="justify-self-end">
-              <span class="label p-1/2">Match Type:</span>
-              <span class="value status-idle" id="cur-match-type">N/A</span>
+          <div class="flex-1"></div>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <div class="flex items-center">
+              <button id="btn-start" class="btn btn-success btn-attached"><i data-icon="play" data-icon-class="icon-sm"></i>Start</button>
+              <div id="seg-start" class="seg" title="Countdown seconds"></div>
+            </div>
+            <button id="btn-abort" class="btn btn-danger"><i data-icon="stop" data-icon-class="icon-sm"></i><span id="abort-label">Abort</span></button>
+            <span class="w-px h-5 bg-line mx-1"></span>
+            <div class="flex items-center">
+              <button id="btn-timer" class="btn btn-soft btn-attached"><i data-icon="timer" data-icon-class="icon-sm"></i>Timer</button>
+              <div id="seg-timer" class="seg" title="Timer seconds"></div>
             </div>
           </div>
-        <div id="scores-container" class="flex gap-4">
-          <div class="flex flex-col flex-1 bg-red-50 dark:bg-red-900/20 rounded p-3 score">
-              <div class="flex justify-between items-center mb-3">
-                <div class="text-center font-bold text-lg mb-2 score-team-name">Red team</div>
-                <div class="text-center font-bold text-2xl mb-3 score-team-total text-right"></div>
-              </div>
-              <div class="score-players space-y-1"></div>
-          </div>
-          <div class="flex flex-col flex-1 bg-blue-50 dark:bg-blue-900/20 rounded p-3 score">
-              <div class="flex justify-between items-center mb-3">
-                <div class="text-center font-bold text-2xl mb-3 score-team-total"></div>
-                <div class="text-center font-bold text-lg mb-2 score-team-name text-right">Blue team</div>
-              </div>
-              <div class="score-players space-y-1"></div>
-          </div>
-          <div class="score-players-solo space-y-1 flex flex-col">
-            <!-- Player rows will be inserted here -->
-          </div>
         </div>
+        <div id="now-map"></div>
+      </section>
+
+      <section id="chat" class="card flex flex-col flex-1 min-h-[16rem]">
+        <div class="h-10 shrink-0 flex items-center gap-2 px-3 border-b border-line">
+          <span class="panel-title">Chat</span><span class="font-mono text-[11px] text-muted">#<span id="chat-ch"></span></span>
+          <div class="flex-1"></div>
+          <label class="flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none"><input id="chk-sys" type="checkbox" class="chk" checked> system messages</label>
+        </div>
+        <div id="chat-log" class="flex-1 min-h-0 overflow-y-auto px-3 py-2 flex flex-col gap-1"></div>
+        <div class="shrink-0 border-t border-line px-3 pt-2">
+          <div class="flex items-center gap-1.5 mb-1.5">
+            <span class="panel-title flex items-center gap-1"><i data-icon="zap" data-icon-class="icon-sm"></i>Macros</span>
+            <span class="text-[11px] text-muted hidden lg:inline">Alt+1…9</span>
+            <div class="flex-1"></div>
+            <button id="btn-macros" class="btn btn-sm btn-ghost"><i data-icon="pencil" data-icon-class="icon-sm"></i>Edit</button>
+          </div>
+          <div id="macro-bar" class="flex flex-wrap gap-1.5 pb-2"></div>
+        </div>
+        <div class="shrink-0 px-3 pb-3 flex gap-2 relative">
+          <div id="cmd-panel" class="cmd-panel" hidden>
+            <div id="cmd-list" class="cmd-list"></div>
+            <div id="cmd-detail" class="cmd-detail"></div>
+          </div>
+          <div id="ac" class="ac" hidden></div>
+          <button id="btn-cmds" class="btn btn-soft font-mono text-xs px-2.5" title="Command list">!mp</button>
+          <input id="chat-input" class="input" placeholder="Message or !mp command" autocomplete="off" spellcheck="false">
+          <button id="chat-send" class="btn btn-primary btn-icon" title="Send"><i data-icon="send"></i></button>
+        </div>
+      </section>
+
+      <section id="scores" class="card p-3 shrink-0">
+        <div class="flex items-center gap-2 mb-2 flex-wrap">
+          <span class="panel-title">Scores</span>
+          <div class="flex-1"></div>
+          <div id="tally" class="flex items-center gap-2 flex-wrap"></div>
+          <button id="btn-history" class="btn btn-sm btn-ghost"><i data-icon="history" data-icon-class="icon-sm"></i>History</button>
+        </div>
+        <div id="score-board"></div>
+        <div id="score-award" class="flex items-center gap-1.5 flex-wrap mt-2 pt-2 border-t border-line" hidden></div>
+        <div id="score-history" class="mt-3 border-t border-line pt-2 flex flex-col gap-0.5 max-h-40 overflow-y-auto" hidden></div>
+      </section>
+    </main>
+
+    <aside id="col-queue" class="min-h-0 flex flex-col border-l border-line bg-surface-1">
+      <div class="h-10 shrink-0 flex items-center gap-2 px-3 border-b border-line">
+        <span class="panel-title">Map queue</span><span id="queue-count" class="font-mono text-[11px] text-muted"></span>
+        <div class="flex-1"></div>
+        <button id="btn-addmap" class="btn btn-icon btn-sm btn-ghost" title="Add map"><i data-icon="plus" data-icon-class="icon-sm"></i></button>
+        <button id="btn-queue-close" class="btn btn-icon btn-sm btn-ghost xl:hidden" title="Close"><i data-icon="x" data-icon-class="icon-sm"></i></button>
       </div>
+      <div id="queue-list" class="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col gap-1.5"></div>
+      <div id="events" class="shrink-0 border-t border-line flex flex-col max-h-[45%]">
+        <button id="btn-events" class="h-9 shrink-0 flex items-center gap-2 px-3 w-full text-left hover:bg-surface-3/60 transition-colors">
+          <span class="panel-title">Events</span><span id="events-count" class="chip"></span>
+          <div class="flex-1"></div>
+          <i id="events-chev" data-icon="chevron" data-icon-class="icon-sm" class="text-muted transition-transform"></i>
+        </button>
+        <div id="event-log" class="min-h-0 overflow-y-auto px-2 pb-2 flex flex-col gap-1 font-mono text-[11px]" hidden></div>
+      </div>
+    </aside>
+  </div>
 
-      </div><!-- /#room-actions -->
-
+  <!-- ── landing (room setup) ─────────────────────────────────────── -->
+  <div id="view-landing" class="flex-1 min-h-0 overflow-y-auto">
+    <div class="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-12">
+      <h1 class="text-xl font-semibold">Signed in as <span id="ld-me">…</span></h1>
+      <p class="text-sm text-muted mt-1 mb-6">Create a room or join one by ID.</p>
+      <div class="grid gap-4 md:grid-cols-2">
+        <section class="card p-5 flex flex-col gap-3">
+          <h2 class="font-semibold">Create room</h2>
+          <label class="block"><span class="label">Room name</span><input id="make-room-name" class="input" placeholder="APL: (Team A) vs (Team B)"></label>
+          <div><span class="label">Ruleset</span><div id="make-ruleset" class="seg seg-lg"></div></div>
+          <div class="grid grid-cols-[1fr_7rem] gap-3">
+            <label class="block"><span class="label">First beatmap ID</span><input id="make-beatmap-id" class="input font-mono" type="number" value="2626718"></label>
+            <label class="block"><span class="label">Slots</span><input id="make-room-max-participants" class="input font-mono" type="number" value="8" min="0" max="16"></label>
+          </div>
+          <div id="make-preview" class="text-xs text-muted font-mono -mt-1 min-h-4"></div>
+          <div class="flex items-center justify-end gap-3 mt-1"><span class="result-msg" id="make-room-result"></span><button id="make-room-btn" class="btn btn-primary">Create room</button></div>
+        </section>
+        <section class="card p-5 flex flex-col gap-3 self-start">
+          <h2 class="font-semibold">Join room</h2>
+          <div class="flex gap-2">
+            <input id="join-room-id" class="input font-mono" type="number" placeholder="Room ID, e.g. 1487223">
+            <button id="join-room-btn" class="btn btn-soft shrink-0">Join</button>
+          </div>
+          <p class="text-xs text-muted">Requires referee access to the room.</p>
+          <span class="result-msg" id="join-room-result"></span>
+        </section>
+      </div>
     </div>
-    <template id="player-item">
-      <div class="player-item">
-        <span class="player-team"></span>
-        <div class="flex-1">
-          <div class="flex items-center gap-2">
-            <span class="player-name"></span>
-            <span class="player-status bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100">-</span>
-            <button class="kick-btn">Kick</button>
-          </div>
-          <div id="player-mods" class="player-mods text-xs text-gray-500 mb-0"></div>
-          <div class="player-style text-xs text-gray-500 mb-0"></div>
-        </div>
-      </div>
-    </template>
+  </div>
+</div>
 
-    <template id="empty-slot">
-      <div class="player-item">
-        <span class="player-team"></span>
-        <div class="flex-1">
-          <div class="flex items-center gap-2">
-            <span class="text-gray-400">[ empty slot ]</span>
-          </div>
-        </div>
-      </div>
-    </template>
-    <template id="playlist-item">
-      <div class="playlist-current" id="playlist-current">
-        <div class="playlist-item">
-          <div class="playlist-item-header">
-            <span class="playlist-item-id"></span>
-            <span class="flex gap-1">
-              <span class="playlist-item-ruleset mr-1"></span>
-              <button id="edit-playlist-btn" class="edit-playlist-btn text-xs bg-gray-400 hover:bg-gray-500 text-white px-2 py-1 rounded">Edit</button>
-            </span>
-          </div>
-        </div>
-      </div>
-    </template>
-    <template id="playlist-text">
-      <div class="playlist-item-text">
-        <span class="label"></span>
-        <span class="value"></span>
-      </div>
-    </template>
-    </template>
-    <template id="chat-message">
-      <div class="flex items-start gap-2 mb-2">
-        <img class="chat-avatar w-8 h-8 rounded-full bg-gray-300" src="" alt="Avatar" />
-        <div class="flex-1 min-w-0">
-          <div class="chat-username text-sm font-medium text-gray-900 dark:text-gray-100"></div>
-          <div class="chat-message text-sm text-gray-700 dark:text-gray-300 break-words"></div>
-        </div>
-      </div>
-    </template>
-    </template>
-    <template id="sys-message">
-      <div class="flex items-start gap-2 m-2 font-mono italic border-b-1 border-solid">
-        <div class="flex-1 min-w-0 m-1">
-          <div class="sys-message text-sm text-gray-700 dark:text-gray-300 break-words"></div>
-        </div>
-      </div>
-    </template>
+<!-- ── dialogs ────────────────────────────────────────────────────── -->
+<dialog id="dlg-confirm"><div class="dlg">
+  <h3 id="confirm-title" class="font-semibold text-base mb-1"></h3>
+  <p id="confirm-body" class="text-sm text-muted whitespace-pre-line leading-relaxed"></p>
+  <div class="flex justify-end gap-2 mt-5"><button id="confirm-cancel" class="btn btn-soft">Cancel</button><button id="confirm-ok" class="btn btn-danger-solid">Confirm</button></div>
+</div></dialog>
 
-    <template id="player-mods-verbose">
-      <div class="mods-container bg-gray-100 dark:bg-gray-700 p-3 rounded text-sm mb-2">
-        <div class="mods-user font-semibold text-gray-900 dark:text-gray-50 mb-3"></div>
-        <div class="mods-list flex flex-col gap-2"></div>
-      </div>
-    </template>
+<dialog id="dlg-map"><div class="dlg flex flex-col gap-3">
+  <div class="flex items-center"><h3 id="map-title" class="font-semibold text-base">Add map</h3><div class="flex-1"></div><button id="map-remove" class="btn btn-sm btn-danger" hidden><i data-icon="trash" data-icon-class="icon-sm"></i>Remove from queue</button></div>
+  <div class="grid grid-cols-[1fr_auto] gap-3 items-end">
+    <label class="block"><span class="label">Beatmap ID or URL</span><input id="map-beatmap" class="input font-mono" type="text" placeholder="3398826 or https://osu.ppy.sh/beatmaps/3398826"></label>
+    <div><span class="label">Ruleset</span><div id="map-ruleset" class="seg seg-lg"></div></div>
+  </div>
+  <div class="grid grid-cols-2 gap-3">
+    <label class="block"><span class="label">Required mods</span><input id="map-required" class="input font-mono uppercase" placeholder="HD DT"></label>
+    <label class="block"><span class="label">Allowed mods (freemod)</span><input id="map-allowed" class="input font-mono uppercase" placeholder="HD HR EZ FL"></label>
+  </div>
+  <label class="flex items-center gap-2 text-sm"><input id="map-freestyle" type="checkbox" class="chk"> Freestyle <span class="text-muted text-xs">— players choose their own difficulty</span></label>
+  <p class="text-xs text-muted">Beatmap details are fetched from the osu! API after saving.</p>
+  <div class="flex items-center justify-end gap-2 mt-1"><span class="result-msg mr-auto" id="map-result"></span><button id="map-cancel" class="btn btn-soft">Cancel</button><button id="map-save" class="btn btn-primary">Save</button></div>
+</div></dialog>
 
-    <template id="player-mod-item">
-      <div class="mod-item bg-gray-50 dark:bg-gray-800 p-2 rounded">
-        <div class="mb-1 gap-1">
-          <div class="float-left mr-1 mod-item-name text-xs px-2 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-400 font-medium"></div>
-          <div class="mod-item-settings font-mono text-xs text-gray-500 dark:text-gray-400 break-normal"></div>
+<dialog id="dlg-invite"><div class="dlg flex flex-col gap-3">
+  <h3 id="inv-title" class="font-semibold text-base">Invite player</h3>
+  <label class="block"><span class="label">Username or user ID</span><input id="inv-name" class="input" placeholder="mrekk  or  #7562902" autocomplete="off"></label>
+  <p id="inv-hint" class="text-xs text-muted">This dialog stays open for multiple invites.</p>
+  <span class="result-msg" id="inv-result"></span>
+  <div class="flex justify-end gap-2 mt-1"><button id="inv-cancel" class="btn btn-soft">Done</button><button id="inv-ok" class="btn btn-primary">Send invite</button></div>
+</div></dialog>
+
+<dialog id="dlg-settings"><div class="dlg flex flex-col gap-4">
+  <h3 class="font-semibold text-base">Room settings</h3>
+  <div class="grid grid-cols-2 gap-3">
+    <label class="block col-span-2"><span class="label">Room name</span><input id="set-name" class="input"></label>
+    <label class="block"><span class="label">Password</span><input id="set-password" class="input font-mono" placeholder="none"></label>
+    <label class="block"><span class="label">Max participants</span><input id="set-max" class="input font-mono" type="number" min="0" max="16"></label>
+    <div class="col-span-2"><span class="label">Match type</span><div id="set-type" class="seg seg-lg"></div></div>
+  </div>
+  <div class="border-t border-line pt-3 flex flex-col gap-3">
+    <div class="flex items-baseline gap-2"><span class="panel-title">Local settings</span><span class="text-xs text-muted">Only stored on this PC; used for matches.</span></div>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block"><span class="label" style="color:var(--team-red)">Red team</span><input id="set-red" class="input"></label>
+      <label class="block"><span class="label" style="color:var(--team-blue)">Blue team</span><input id="set-blue" class="input"></label>
+    </div>
+    <div class="flex flex-col gap-3">
+      <label class="flex items-center gap-2 text-sm"><input id="set-track" type="checkbox" class="chk"> Track match score</label>
+      <div id="set-track-opts" class="grid grid-cols-2 gap-3 pl-6">
+        <div><span class="label">Map result</span><div id="set-track-mode" class="seg seg-lg"></div></div>
+        <div><span class="label">Format</span><div id="set-track-format" class="seg seg-lg"></div></div>
+        <label id="set-bo-wrap" class="block"><span class="label">Best of</span><div class="flex items-center gap-2"><input id="set-bo" class="input font-mono w-20" type="number" min="1" max="21"><span id="set-bo-hint" class="text-[11px] text-muted font-mono"></span></div></label>
+        <div id="set-custom-wrap" class="flex items-end gap-3">
+          <label class="block"><span class="label">Points to win</span><input id="set-ptw" class="input font-mono w-20" type="number" min="1" max="50"></label>
+          <label class="flex items-center gap-2 text-sm h-8"><input id="set-draws" type="checkbox" class="chk"> Allow draws</label>
         </div>
       </div>
-    </template>
-
-    <template id="player-score">
-      <div class="flex justify-between text-sm items-center gap-2">
-        <span class="score-player-name truncate"></span>
-        <span class="score-player-score font-mono"></span>
+    </div>
+    <div>
+      <span class="label">Sounds</span>
+      <div class="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+        <label class="flex items-center gap-2"><input id="set-snd-ready" type="checkbox" class="chk"> All players ready</label>
+        <label class="flex items-center gap-2"><input id="set-snd-end" type="checkbox" class="chk"> Match finished</label>
+        <label class="flex items-center gap-2"><input id="set-snd-timer" type="checkbox" class="chk"> Timer ended</label>
       </div>
-    </template>
-    <script type="module" src="index.js"></script>
+    </div>
+  </div>
+  <div class="flex items-center justify-end gap-2"><span class="result-msg mr-auto" id="set-result"></span><button id="set-cancel" class="btn btn-soft">Cancel</button><button id="set-apply" class="btn btn-primary">Apply</button></div>
+</div></dialog>
+
+<dialog id="dlg-macros" class="wide"><div class="dlg dlg-flush overflow-hidden">
+  <div class="flex items-center gap-3 px-5 h-12 border-b border-line">
+    <h3 class="font-semibold text-base flex items-center gap-2"><i data-icon="zap" data-icon-class="icon-sm text-accent"></i>Macros</h3>
+    <span class="text-xs text-muted hidden md:inline">A macro runs its steps in order: chat messages and commands. Alt+1–9 triggers the first nine.</span>
+    <div class="flex-1"></div>
+    <button id="mac-reset" class="btn btn-sm btn-ghost">Reset to defaults</button>
+    <button id="mac-close" class="btn btn-sm btn-soft">Done</button>
+  </div>
+  <div class="grid md:grid-cols-[15rem_minmax(0,1fr)] h-[min(33rem,78vh)]">
+    <div class="border-r border-line flex flex-col min-h-0 bg-surface-2/40">
+      <div id="mac-list" class="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col gap-0.5"></div>
+      <div class="p-2 border-t border-line"><button id="mac-new" class="btn btn-soft w-full"><i data-icon="plus" data-icon-class="icon-sm"></i>New macro</button></div>
+    </div>
+    <div class="min-h-0 overflow-y-auto">
+      <div id="mac-empty" class="p-10 text-center text-sm text-muted" hidden>No macros. Create one to get started.</div>
+      <div id="mac-form" class="p-5 flex flex-col gap-4">
+        <div class="grid grid-cols-[1fr_auto] gap-4 items-end">
+          <label class="block"><span class="label">Label</span><input id="mac-label" class="input"></label>
+          <div><span class="label">Colour</span><div id="mac-colors" class="flex gap-2 h-8 items-center px-0.5"></div></div>
+        </div>
+        <div>
+          <label class="block"><span class="label">Steps <span class="opacity-70">(one per line, run in order)</span></span><textarea id="mac-script" class="input font-mono text-xs" rows="5" spellcheck="false"></textarea></label>
+          <p class="text-[11px] text-muted mt-1.5">Lines starting with <code class="font-mono text-ink">!</code> or <code class="font-mono text-ink">/</code> run as commands. Other lines are sent to chat.</p>
+          <div id="mac-ph" class="flex flex-wrap items-center gap-1 mt-1.5"><span class="text-[11px] text-muted mr-1">Insert:</span></div>
+        </div>
+        <label class="flex items-center gap-2 text-sm"><input id="mac-confirm" type="checkbox" class="chk"> Confirm before running</label>
+        <div><span class="label">Preview</span><div id="mac-preview" class="border border-line bg-surface-0 p-3 flex flex-col gap-1.5 min-h-14"></div></div>
+        <div class="flex items-center gap-1 pt-3 border-t border-line">
+          <button id="mac-up" class="btn btn-sm btn-ghost"><i data-icon="arrowup" data-icon-class="icon-sm"></i>Move up</button>
+          <button id="mac-down" class="btn btn-sm btn-ghost"><i data-icon="arrowdown" data-icon-class="icon-sm"></i>Move down</button>
+          <div class="flex-1"></div>
+          <button id="mac-delete" class="btn btn-sm btn-danger"><i data-icon="trash" data-icon-class="icon-sm"></i>Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></dialog>
+
+<div id="toasts"></div>
+
+    <script type="module" src="bootstrap.js"></script>
   </body>
 </html>

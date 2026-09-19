@@ -5,12 +5,12 @@ const asar = require('@electron/asar')
 const plist = require('plist')
 const { validateModsJson } = require('./ensureMods')
 
-const [platform, arch] = process.argv.slice(2)
+const [platform, arch, outputDir = 'out'] = process.argv.slice(2)
 assert(['win32', 'linux', 'darwin'].includes(platform), 'Specify a supported platform')
 assert(['x64', 'arm64', 'ia32'].includes(arch), 'Specify a supported architecture')
 const root = path.resolve(__dirname, '..')
 const pkg = require('../package.json')
-const output = path.join(root, 'out', `${pkg.name}-${platform}-${arch}`)
+const output = path.resolve(root, outputDir, `${pkg.name}-${platform}-${arch}`)
 const contents = path.join(output, `${pkg.name}.app`, 'Contents')
 const resources = platform === 'darwin' ? path.join(contents, 'Resources') : path.join(output, 'resources')
 const archive = path.join(resources, 'app.asar')
@@ -24,6 +24,9 @@ for (const file of [
     'src/referee/commands.js', 'src/renderer/index.html', 'src/renderer/index.js',
     'src/renderer/models.js', 'src/renderer/utils.js', 'src/renderer/mods.js',
     'src/renderer/config.html', 'src/renderer/mods.json', 'src/renderer/css/tailwind.css',
+    'src/renderer/macros.js', 'src/renderer/cmdpalette.js', 'src/renderer/tracking.js',
+    'src/renderer/local.js', 'src/renderer/ui/dom.js', 'src/renderer/ui/render.js',
+    'src/main/http.js', 'src/renderer/bootstrap.js', 'src/renderer/inputs.js', 'src/renderer/requests.js',
 ]) {
     // ASAR paths use the host separator, including on Windows.
     const relative = file.split('/').join(path.sep)

@@ -20,7 +20,7 @@ class RefereeClient {
     async connect() {
         this.connection = new signalR.HubConnectionBuilder()
             .withUrl(new URL(IS_PROD ? '/referee' : 'signalr/referee', this.url).toString(), {
-                accessTokenFactory: () => this.accessToken
+                accessTokenFactory: () => this.getAccessToken()
             })
             .withAutomaticReconnect()
             .configureLogging(signalR.LogLevel.Information)
@@ -28,7 +28,7 @@ class RefereeClient {
 
         setupEventHandlers(this.connection, {
             onClose: () => { this.connected = false },
-            onReconnecting: this.callbacks.onReconnecting,
+            onReconnecting: error => { this.connected = false; this.callbacks.onReconnecting?.(error) },
             onReconnected: () => { this.connected = true }
         }, this.sendToRenderer)
 
@@ -53,6 +53,10 @@ class RefereeClient {
             await this.connection.stop()
             this.connected = false
         }
+    }
+    async getAccessToken() {
+        if (this.tokenProvider) this.accessToken = await this.tokenProvider()
+        return this.accessToken
     }
     async resyncRoom(roomId) {
         if (this.resyncingRoom) throw new Error('Room resync already in progress')

@@ -1,3 +1,7 @@
+import { toast, confirmUI as confirmDlg, uid } from './ui/dom.js'
+import { appendSys } from './ui/render.js'
+import { requireSuccess } from './requests.js'
+
 const log = {}
 const modes = ['debug', 'info', 'warn', 'error']
 modes.forEach(x => log[x] = (text) => {
@@ -7,7 +11,7 @@ modes.forEach(x => log[x] = (text) => {
 
 export function idFromUsername(username, arr, refs) {
     arr = Object.assign({}, arr, refs)
-    let user = Object.keys(arr).find(key => arr[key].user.username == username)
+    let user = Object.keys(arr).find(key => arr[key].user?.username?.toLowerCase() === String(username).toLowerCase())
     if (user != undefined) {
         return user;
     } else {
@@ -15,14 +19,43 @@ export function idFromUsername(username, arr, refs) {
     }
 }
 
+// ── beatmap cache ─────────────────────────────────────────────────────
+window.beatmaps = window.beatmaps || {}
+const inflight = new Map()
+let onBeatmapLoaded = () => {}
+export function setBeatmapListener(fn) { onBeatmapLoaded = fn }
+
 export async function GetBeatmap(beatmap_id) {
     if (window.beatmaps[beatmap_id]) return window.beatmaps[beatmap_id]
-    let map = await window.api.api.GetBeatmap(beatmap_id)
-    console.log("grabbing beatmap data")
-    window.beatmaps[beatmap_id] = map.data
-    return map.data
+    if (inflight.has(beatmap_id)) return inflight.get(beatmap_id)
+    const p = window.api.api.GetBeatmap(beatmap_id).then(map => {
+        const data = requireSuccess(map, `Load beatmap ${beatmap_id}`)
+        window.beatmaps[beatmap_id] = data ?? { error: 'empty' }
+        inflight.delete(beatmap_id)
+        onBeatmapLoaded(beatmap_id)
+        return window.beatmaps[beatmap_id]
+    }).catch(err => {
+        inflight.delete(beatmap_id)
+        window.beatmaps[beatmap_id] = { error: err?.message ?? 'failed' }
+        onBeatmapLoaded(beatmap_id)
+        return window.beatmaps[beatmap_id]
+    })
+    inflight.set(beatmap_id, p)
+    return p
+}
+// Synchronous accessor for render code: returns the cached beatmap or null and kicks off a fetch.
+export function beatmapCached(beatmap_id) {
+    if (!beatmap_id) return null
+    const c = window.beatmaps[beatmap_id]
+    if (c) return c
+    GetBeatmap(beatmap_id)
+    return null
 }
 
+// ── event log ─────────────────────────────────────────────────────────
+export const events = []
+let onEvents = () => {}
+export function setEventsListener(fn) { onEvents = fn }
 
 export async function logEvent(name, data) {
     let isRes = false;
@@ -32,85 +65,36 @@ export async function logEvent(name, data) {
         isRes = true;
     }
     console.log(name, data)
-    const log_div = document.getElementById('event-log')
-    const placeholder = log_div.querySelector('.event-placeholder')
-    if (placeholder) placeholder.remove()
-    const entry = document.createElement('div')
-    entry.className = 'event-entry'
-    const time = document.createElement('div');
-    time.textContent = name + ': [' + new Date().toLocaleTimeString() + ']'
+    let title = name
     if (isRes) {
-        time.textContent += data.success ? " Succeeded" : " Failed"
+        title += data.success ? " · ok" : " · failed"
         data = data.success ? data.data : data.error
-    } else {
-        if (!keep_room_id.includes(name)) delete data.room_id // dont need since this client only works 1 room at a time
+    } else if (data && typeof data === 'object') {
+        data = { ...data }
+        if (!keep_room_id.includes(name)) delete data.room_id
     }
-    const logData = document.createElement('div');
-    if (data == null) {data = ''}
-    if (typeof data == 'string') {
-        logData.textContent = data
-    } else {
-        for(const [key, value] of Object.entries(data)) {
-            const x = document.createElement('div');
-            x.textContent = key + ": " + (typeof value == 'string' ? value : JSON.stringify(value, null, ' '))
-            logData.append(x)
-        }
-    }
-    entry.append(time)
-    entry.append(logData)
-    log_div.prepend(entry)
-    const str = JSON.stringify(data)
-    log.info(name + ":" + str);
+    let text
+    if (data == null) text = ''
+    else if (typeof data == 'string') text = data
+    else text = Object.entries(data).map(([k, v]) => k + ": " + (typeof v == 'string' ? v : JSON.stringify(v))).join('\n')
+    events.unshift({ id: uid(), name: title, ts: Date.now(), text })
+    if (events.length > 200) events.length = 200
+    onEvents()
+    log.info(name + ":" + JSON.stringify(data));
 }
+export function clearEvents() { events.length = 0; onEvents() }
 
-export function addSystemMsg(msg) {
-    document.getElementById("no-messages")?.remove()
-    const template = document.getElementById("sys-message")
-    const clone = template.content.cloneNode(true);
-    
-    clone.querySelector('.sys-message').textContent = msg
-    
-    const chatbox = document.getElementById("chat-messages")
-    chatbox.appendChild(clone)
+// ── chat / ui shims used across modules ───────────────────────────────
+export function addSystemMsg(msg, tone, action) { appendSys(msg, tone, action) }
+export function showToast(message, duration = 3000) { toast(message, duration) }
+export function confirmUI(title, body, opts) { return confirmDlg(title, body, opts) }
 
-    if (chatbox.scrollHeight - chatbox.scrollTop - chatbox.clientHeight < 50) {
-        chatbox.scrollTop = chatbox.scrollHeight;
-    }
-
-}
-
-export function showToast(message, duration = 3000) {
-    const toast = document.getElementById('toast')
-    toast.textContent = message
-    toast.classList.remove('hidden')
-    setTimeout(() => toast.classList.add('hidden'), duration)
-}
-
-export function confirmUI(title, body) {
-    return new Promise((resolve) => {
-        document.getElementById('confirm-title').textContent = title
-        document.getElementById('confirm-body').textContent = body
-        const modal = document.getElementById('confirm-modal')
-        modal.classList.add('visible')
-
-        const okBtn = document.getElementById('confirm-ok')
-        const cancelBtn = document.getElementById('confirm-cancel')
-
-        function settle(value) {
-            modal.classList.remove('visible')
-            resolve(value)
-        }
-
-        okBtn.onclick = () => settle(true)
-        cancelBtn.onclick = () => settle(false)
-    })
-}
-
+// ── osu proxy: every referee-hub call is logged to the events panel ───
 let objs = Object.entries(window.api.send)
 let osu = {}
 for (const cmd of objs) {
     osu[cmd[0]] = (...args) => {
-        const res = cmd[1](...args)
+        const res = Promise.resolve().then(() => cmd[1](...args)).catch(error => ({ success: false, error: error?.message ?? String(error) }))
         logEvent(cmd[0], res)
         return res
     }

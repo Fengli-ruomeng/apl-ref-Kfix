@@ -4,7 +4,9 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 module.exports = {
     packagerConfig: {
         asar: true,
-        icon: 'assets/aplreflogo'
+        icon: 'assets/aplreflogo',
+        // dev-only: the standalone UI draft and the offline mock preload
+        ignore: [/^\/prototype($|\/)/, /^\/preload\.mock\.js$/, /^\/out($|\/)/, /^\/tests($|\/)/],
     },
     rebuildConfig: {},
     makers: [

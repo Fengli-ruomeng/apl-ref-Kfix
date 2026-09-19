@@ -4,6 +4,7 @@ const { CMDS_SET } = require('../referee/commands')
 const { EVENTS } = require('../referee/events')
 const { version } = require('../../package.json')
 const { getLogger } = require("@logtape/logtape")
+const { fetchJson } = require('./http')
 const IS_PROD = process.env.DEV_SERVER == null
 const  OSU_SERVER = IS_PROD ? "osu.ppy.sh" : "dev.ppy.sh"
 
@@ -65,8 +66,8 @@ function setupIpcHandlers(getRefereeClient) {
         const logger = getLogger(["apl-ref", "web"]);
         return logger[type]("{text}", {text})
     }))
-    ipcMain.handle('GetUser', createQueryHandler(getRefereeClient, (client, user_id) => {
-        const accessToken = client.accessToken;
+    ipcMain.handle('GetUser', createQueryHandler(getRefereeClient, async (client, user_id) => {
+        const accessToken = await client.getAccessToken();
         const url = new URL(`https://${OSU_SERVER}/api/v2/users/${user_id}/osu`);
         //url.searchParams.append("key", "at")
         // ^ technically we want either or so...
@@ -76,15 +77,15 @@ function setupIpcHandlers(getRefereeClient) {
             Authorization: `Bearer ${accessToken}`,
         }
 
-        const x = fetch(url, {
+        const x = fetchJson(url, {
             method: "GET",
             headers,
-        }).then(response => response.json())
+        })
         //console.log(x)
         return x;
     }))
-    ipcMain.handle('GetSelf', createQueryHandler(getRefereeClient, (client) => {
-        const accessToken = client.accessToken;
+    ipcMain.handle('GetSelf', createQueryHandler(getRefereeClient, async (client) => {
+        const accessToken = await client.getAccessToken();
         const url = new URL(`https://${OSU_SERVER}/api/v2/me`);
         const headers = {
             "Content-Type": "application/json",
@@ -92,15 +93,15 @@ function setupIpcHandlers(getRefereeClient) {
             Authorization: `Bearer ${accessToken}`,
         }
 
-        const x = fetch(url, {
+        const x = fetchJson(url, {
             method: "GET",
             headers,
-        }).then(response => response.json())
+        })
         //console.log(x)
         return x;
     }))
-    ipcMain.handle('SendMessage', createQueryHandler(getRefereeClient, (client, channel_id, message) => {
-        const accessToken = client.accessToken;
+    ipcMain.handle('SendMessage', createQueryHandler(getRefereeClient, async (client, channel_id, message) => {
+        const accessToken = await client.getAccessToken();
         const url = new URL(`https://${OSU_SERVER}/api/v2/chat/channels/${channel_id}/messages`);
         const headers = {
             "Content-Type": "application/json",
@@ -112,14 +113,14 @@ function setupIpcHandlers(getRefereeClient) {
             "message": message,
             "is_action": false
         };
-        return fetch(url, {
+        return fetchJson(url, {
             method: "POST",
             headers,
             body: JSON.stringify(body),
-        }).then(response => response.json());
+        });
     }))
-    ipcMain.handle('GetBeatmap', createQueryHandler(getRefereeClient, (client, beatmap_id) => {
-        const accessToken = client.accessToken;
+    ipcMain.handle('GetBeatmap', createQueryHandler(getRefereeClient, async (client, beatmap_id) => {
+        const accessToken = await client.getAccessToken();
         const url = new URL(`https://${OSU_SERVER}/api/v2/beatmaps/${beatmap_id}`);
         const headers = {
             "Content-Type": "application/json",
@@ -127,13 +128,13 @@ function setupIpcHandlers(getRefereeClient) {
             Authorization: `Bearer ${accessToken}`,
         }
         
-        return fetch(url, {
+        return fetchJson(url, {
             method: "GET",
             headers,
-        }).then(response => response.json());
+        });
     }))
-    ipcMain.handle('GetScores', createQueryHandler(getRefereeClient, (client, room_id, playlist_id) => {
-        const accessToken = client.accessToken;
+    ipcMain.handle('GetScores', createQueryHandler(getRefereeClient, async (client, room_id, playlist_id) => {
+        const accessToken = await client.getAccessToken();
         const url = new URL(`https://${OSU_SERVER}/api/v2/rooms/${room_id}/playlist/${playlist_id}/scores`);
         const headers = {
             "Content-Type": "application/json",
@@ -141,10 +142,10 @@ function setupIpcHandlers(getRefereeClient) {
             Authorization: `Bearer ${accessToken}`,
         }
         
-        return fetch(url, {
+        return fetchJson(url, {
             method: "GET",
             headers,
-        }).then(response => response.json());
+        });
     }))
 
     ipcMain.handle('CloseWS', createQueryHandler(getRefereeClient, (client) => {
@@ -157,14 +158,24 @@ function setupIpcHandlers(getRefereeClient) {
 
 }
 
-function setupWSEvents(accessToken, sendFunc) {
+function setupWSEvents(tokenProvider, sendFunc) {
     const logger  = getLogger (["apl-ref", "WS"]);
-    const headers = { Authorization: `Bearer ${accessToken}`};
     const url = IS_PROD ? "wss://notify.ppy.sh" : "wss://dev.ppy.sh/home/notifications/feed"
     let ws;
     let reconnectTimer = null
     let attempts = 0;
-    function connect() {
+    let stopped = false
+    function reconnect() {
+        if (stopped) return
+        const delay = Math.min(1000 * (2 ** attempts++), 16_000)
+        clearTimeout(reconnectTimer)
+        reconnectTimer = setTimeout(connect, delay)
+    }
+    async function connect() {
+        try {
+        const accessToken = typeof tokenProvider === 'function' ? await tokenProvider() : tokenProvider
+        if (stopped) return
+        const headers = { Authorization: `Bearer ${accessToken}` }
         ws = new WebSocket(url, [], { headers });
         ws.on('open', () => {
             ws.send(JSON.stringify({ event: 'chat.start' }));
@@ -175,23 +186,18 @@ function setupWSEvents(accessToken, sendFunc) {
             //console.log(buffer.toString())
             sendFunc('chat-event', buffer.toString())
         });
-        ws.on('close', (ev) => {
-            logger.error("Closed: {ev}", ev)
-            const delay = Math.min(1000 * (2 ** attempts), 16_000) // exponential backoff i think, max 16sec
-            attempts += 1
-            logger.info(`Attempting reconnection in ${delay}ms..`)
-            clearTimeout(reconnectTimer);
-            reconnectTimer = setTimeout(connect, delay)
-
-        })
+        ws.on('close', reconnect)
         ws.on('error', (ev) => {
-            logger.error("Error: {ev}", ev)
+            logger.error('Chat connection error: {message}', { message: ev.message })
             ws.close() // i assume i need this??
         })
+        } catch (error) { logger.error('Chat connection failed: {message}', { message: error.message }); reconnect() }
     }
     connect()
     return () => {
-        ws.close()
+        stopped = true
+        clearTimeout(reconnectTimer)
+        ws?.close()
     }
 }
 

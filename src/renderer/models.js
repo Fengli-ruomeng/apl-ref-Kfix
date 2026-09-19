@@ -1,15 +1,6 @@
-import { idFromUsername, osu, GetBeatmap, MODS, addSystemMsg, showToast, confirmUI } from './utils.js'
-
-function hideRoomActions() {
-    document.getElementById('room-actions').classList.add('hidden')
-    document.getElementById('room-badge').classList.remove('visible')
-    document.getElementById('room-chat-badge').classList.remove('visible')
-    document.getElementById('navbar-room-controls').classList.remove('visible')
-
-    document.getElementById('add-referee').classList.remove('visible')
-    document.getElementById('room-chat-id').textContent = ''
-    document.getElementById('room-name').textContent = "APL Ref Client"
-}
+import { idFromUsername, addSystemMsg } from './utils.js'
+import { loadRoomLocal, saveRoomLocal } from './local.js'
+import { requireSuccess } from './requests.js'
 
 export class User {
     constructor(id, user, team, mods, style, status) {
@@ -23,10 +14,10 @@ export class User {
 }
 
 export class Room {
-    // stores all information about a room
-    constructor(resp) { // RoomJoinedResponse data 
+    // stores all information about a room; rendering happens through onChange
+    constructor(resp) { // RoomJoinedResponse data
         this.disposed = false
-        this.id = resp.room_id 
+        this.id = resp.room_id
         this.chat_channel_id = resp.chat_channel_id
         this.name = resp.name
         this.password = resp.password
@@ -37,38 +28,47 @@ export class Room {
         this.mode = this.updateMode()
         this.players = {}
         this.refs = {}
+        this.userData = new Map()
+        this.userRequests = new Map()
         this.max_participants = resp.state.slots?.length ?? 0;
         this.player_slots = resp.state.slots ?? []
+        this.type = resp.state.type ?? "head_to_head"
+        this.locked = resp.state.locked ?? false
 
+        // 'idle' | 'countdown' | 'playing' | 'results'
+        this.status = "idle"
+        this.countdown = null // { id, total, remaining } from CountdownStarted
+        this.timer = null     // { total, remaining } local chat countdown
+        this.results = []     // finished maps, see tracking.js
+        this.playedItems = {} // playlist items that were played, kept for the score history
+        this.local = loadRoomLocal(this.id, this.name)
+        this.editing_playlist_item = 0;
+
+        // hooks set by index.js
+        this.onChange = () => {}
+        this.onClose = () => {}
+        this.onMatchCompleted = () => {}
+        this.onAllReady = () => {}
+
+        // Install server state synchronously. Profile lookups only replace
+        // display data; they must not overwrite newer player events.
+        for (const p of resp.players) {
+            this.players[p.user_id] = new User(p.user_id, { id: p.user_id, username: `#${p.user_id}` }, p.team, p.mods || [], p.style, p.status)
+            if (!this.player_slots.includes(p.user_id)) this.player_slots.push(p.user_id)
+        }
         for (const ref of resp.referees) {
-            this.GetUser(ref.user_id).then(() => {
+            this.refs[ref.user_id] = new User(ref.user_id, { id: ref.user_id, username: `#${ref.user_id}` }, 'none', [], null, 'referee')
+            this.GetUser(ref.user_id, false).then(() => {
                 if (this.disposed) return
                 this.updateUI()
-                //this.refs[ref.user_id] = u
-            })
+            }).catch(error => { if (!this.disposed) addSystemMsg(error.message, 'warn') })
         }
         for (const p of resp.players) {
             this.GetUser(p.user_id, true).then(() => {
                 if (this.disposed) return
-                this.players[p.user_id].team = p.team
-                this.players[p.user_id].mods = p.mods
-                this.players[p.user_id].status = p.status
-                this.players[p.user_id].style = p.style
-                this.players[p.user_id].mods = p.mods
-                if (this.max_participants == 0 ) this.player_slots.push(p.user_id)
-                // TODO: maybe there's a cleaner way to do this?
-                // since it gets the stuff too slowly so yeah
                 this.updateUI()
-            })
+            }).catch(error => { if (!this.disposed) addSystemMsg(error.message, 'warn') })
         }
-        this.type = resp.state.type ?? "head_to_head"
-        this.locked = resp.state.locked ?? false
-
-        // "playing", "idle", etc
-        this.status = "Idle"
-        // i really need to think of a better way to do this
-        this.editing_playlist_item = 0;
-        this.#showRoomActions()
     }
     updateMode() {
         const currentItem = Object.values(this.playlistItems).find(x => x.order == 0)
@@ -77,281 +77,54 @@ export class Room {
         return this.mode
     }
     async GetUser(user_id, normal) {
-        normal = normal ?? false
         user_id = idFromUsername(user_id, this.players, this.refs) ?? user_id
-        let user = this.players[user_id] ?? this.refs[user_id]
-        if (user != undefined) {
-            return user
-        } else {
-            console.log("grabbing new player!!", user_id, normal)
-            user = (await window.api.api.GetUser(user_id)).data
-            let ret = new User(user.id, user, "none", [], null, normal ? null : "referee")
-            if (normal) this.players[user.id] = ret
-            if (!normal) this.refs[user.id] = ret
-            console.log(ret)
-            return ret
-        }
-    }
-
-    #showRoomActions() {
-        document.getElementById('room-actions').classList.remove('hidden')
-        document.getElementById('room-badge').classList.add('visible')
-        document.getElementById('room-chat-badge').classList.add('visible')
-        document.getElementById('navbar-room-controls').classList.add('visible')
-
-        document.getElementById('add-referee').classList.add('visible')
-        document.getElementById('room-badge').onclick = () => {
-            try {
-                navigator.clipboard.writeText("https://osu.ppy.sh/multiplayer/rooms/" + this.id)
-                showToast("Copied to clipboard!")
-            } catch {
-                showToast("Failed to copy. idk what happened")
+        const key = String(user_id).toLowerCase()
+        let data = this.userData.get(key)
+        if (!data) {
+            let pending = this.userRequests.get(key)
+            if (!pending) {
+                pending = window.api.api.GetUser(user_id).then(result => {
+                    const user = requireSuccess(result, `Load user ${user_id}`)
+                    if (!user?.id) throw new Error(`User ${user_id} was not found`)
+                    this.userData.set(String(user.id), user)
+                    this.userData.set(user.username.toLowerCase(), user)
+                    return user
+                }).finally(() => this.userRequests.delete(key))
+                this.userRequests.set(key, pending)
             }
+            data = await pending
         }
-        document.getElementById('room-chat-id').textContent = this.chat_channel_id
-        document.getElementById('room-name').textContent = this.name
+        for (const record of [this.players[data.id], this.refs[data.id]]) if (record) record.user = data
+        const group = normal === true ? this.players : normal === false ? this.refs : null
+        if (group && !group[data.id] && !this.disposed) group[data.id] = new User(data.id, data, 'none', [], null, normal ? 'idle' : 'referee')
+        return group?.[data.id] ?? this.players[data.id] ?? this.refs[data.id] ?? new User(data.id, data, 'none', [], null, null)
     }
 
-    // UI Helpers and stuff
-    #addPlayer(user_id, player_status, name, team, is_ref) {
-        // "idle", "ready", "playing", "finished_play", "spectating"
-        if (is_ref) team = "none"
-        const team_class = "team-" + team.toLowerCase() // only red and blue or none
-        const template = document.getElementById("player-item")
-        const clone = template.content.cloneNode(true);
-        clone.querySelector(".player-status").textContent = player_status
-        clone.querySelector(".player-name").textContent = name
-        const teamSpan = clone.querySelector(".player-team")
-        teamSpan.classList.add(team_class)
-        clone.getElementById("player-mods").textContent = "N/A"
-        if (!is_ref) teamSpan.addEventListener("click", async () => {
-            if(this.players[user_id].team == "none") return;
-            // hi if this is causing problems just comment it
-            // it stops it from erroring of changing team when it's head-to-head
-            const result = await osu.MoveUser(this.id, {
-                user_id,
-                team: this.players[user_id].team == "red" ? "blue" : "red"
-            })
-            console.log(result)
-        })
-        teamSpan.style.cursor = 'pointer';
-
-        clone.querySelector(".player-item").dataset.user_id =user_id
-        
-        
-        const kickBtn = clone.querySelector(".kick-btn")
-        kickBtn.addEventListener("click", async () => {
-            const confirmed = await confirmUI("Kick Player", "Are you sure you want to kick " + name + "?")
-            if (confirmed) {
-                await osu.KickPlayer(this.id, user_id)
-            }
-        })
-        
-        document.getElementById("player-list").appendChild(clone)
+    // ── derived state ────────────────────────────────────────────────
+    currentItem() { return Object.values(this.playlistItems).find(x => x.order == 0) ?? this.queue()[0] ?? null }
+    queue() { return Object.values(this.playlistItems).filter(x => !x.was_played).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) }
+    playerList() { return Object.values(this.players) }
+    activePlayers() { return this.playerList().filter(p => p.status !== 'spectating') }
+    allReady() { const a = this.activePlayers(); return a.length > 0 && a.every(p => p.status === 'ready') }
+    playerByToken(token) { // "#123" or a username
+        const s = String(token ?? '').trim()
+        if (!s) return null
+        if (s[0] === '#') return this.players[parseInt(s.slice(1), 10)] ?? null
+        return this.playerList().find(p => p.user?.username?.toLowerCase() === s.toLowerCase()) ?? null
     }
 
-    async #addPlaylistItem(playlist_id, ruleset_id, beatmap_id, required_mods, allowed_mods, freestyle) {
-        const modes = ["osu!", "taiko", "catch", "mania"]
-        const template = document.getElementById("playlist-item")
-        const textTemplate = document.getElementById("playlist-text")
-        const beatmap_text = textTemplate.content.cloneNode(true);
-        const clone = template.content.cloneNode(true);
-        beatmap_text.querySelector(".label").textContent = "Beatmap ID"
-        beatmap_text.querySelector(".value").textContent = beatmap_id
-        clone.querySelector(".playlist-item").appendChild(beatmap_text);
-
-        const req_mods_text = textTemplate.content.cloneNode(true);
-        req_mods_text.querySelector(".label").textContent = "Required Mods"
-        let req_mod_readable = required_mods.map(item => item.acronym).join(" ");
-        req_mods_text.querySelector(".value").textContent = req_mod_readable
-        clone.querySelector(".playlist-item").appendChild(req_mods_text);
-
-        const alw_mods_text = textTemplate.content.cloneNode(true);
-        alw_mods_text.querySelector(".label").textContent = "Allowed Mods"
-        let alw_mod_readable = allowed_mods.map(item => item.acronym).join(" ");
-        alw_mods_text.querySelector(".value").textContent = alw_mod_readable
-        clone.querySelector(".playlist-item").appendChild(alw_mods_text);
-
-        const freestyle_text = textTemplate.content.cloneNode(true);
-        freestyle_text.querySelector(".label").textContent = "Freestyle"
-        freestyle_text.querySelector(".value").textContent = freestyle.toString()
-        clone.querySelector(".playlist-item").appendChild(freestyle_text);
-
-        clone.querySelector(".playlist-item-ruleset").textContent = modes[ruleset_id]
-
-        clone.querySelector(".playlist-item").classList.add(playlist_id)
-
-
-        const edit_btn = clone.querySelector(".edit-playlist-btn")
-        edit_btn.addEventListener('click', () => {
-            console.log("hi chat")
-            const modes = ["osu!", "taiko", "catch", "mania"]
-          
-            const textElements = edit_btn.parentNode.parentNode.parentNode.querySelectorAll(".playlist-item-text")
-            let beatmapId = ""
-            let requiredMods = ""
-            let allowedMods = ""
-            let freestyle = false
-            for (const el of textElements) {
-                const label = el.querySelector(".label").textContent
-                const value = el.querySelector(".value").textContent
-                if (label === "Beatmap ID") beatmapId = value
-                else if (label === "Required Mods") requiredMods = value
-                else if (label === "Allowed Mods") allowedMods = value
-                else if (label === "Freestyle") freestyle = value === "true"
-            }
-          
-            const rulesetText = edit_btn.parentNode.parentNode.parentNode.querySelector(".playlist-item-ruleset").textContent
-            const rulesetId = modes.indexOf(rulesetText)
-          
-            document.getElementById("popup-edit-beatmap-id").value = beatmapId
-            document.getElementById("popup-edit-ruleset-id").value = rulesetId >= 0 ? rulesetId : ""
-            document.getElementById("popup-edit-required-mods").value = requiredMods
-            document.getElementById("popup-edit-allowed-mods").value = allowedMods
-            document.getElementById("popup-edit-freestyle").checked = freestyle
-            this.editing_playlist_item = playlist_id
-            document.getElementById('edit-playlist-modal').classList.add('visible')
-        })
-
-        document.getElementById("playlist-items").appendChild(clone)
-        const beatmap = await GetBeatmap(beatmap_id)
-        if (this.disposed) return
-        const playlistItem = document.querySelector(`[class~="${playlist_id}"]`)
-        if (playlistItem) playlistItem.querySelector('.playlist-item-id').textContent = beatmap.beatmapset.title + ` [${beatmap.version}]`
-    }
-    #addModSettingUI(mod_list, mod, mod_template) {
-        let empty = true
-        const settings = Object.entries(mod.settings ?? {})
-        if (settings.length === 0) return {empty, undefault_settings: false}
-
-        const mod_clone = mod_template.content.cloneNode(true);
-        const settings_div = mod_clone.querySelector(".mod-item")
-        let mod_name = settings_div.querySelector(".mod-item-name")
-        let mod_settings = settings_div.querySelector(".mod-item-settings")
-        const mod_info = MODS?.[this.mode]?.Mods?.find(x => x.Acronym == mod.acronym)
-        // settings is in the form of {option: number|string|boolean} im pretty sure
-        let settings_text = []
-        for (const setting of settings) {
-            // MODS()[0].Mods.find(x => x.Acronym == "DA").Settings.find(x => x.Name == "circle_size").Label
-            let label = mod_info?.Settings?.find(x => x.Name == setting[0])?.Label ?? setting[0];
-            settings_text.push(`${label}:${setting[1]}`)
-        }
-        settings_text = settings_text.join(", ")
-        const undefault_settings = settings.length != 0
-        if (undefault_settings) {
-            empty = false
-            
-            mod_name.textContent = mod_info?.Name ?? mod.acronym
-            mod_settings.textContent = settings_text
-        }
-        if (undefault_settings) mod_list.appendChild(mod_clone)
-        return {empty, undefault_settings}
-    }
-    async #addVerboseMods(user_id, mods) {
-        let user = await this.GetUser(user_id, true)
-        if (this.disposed) return
-        const verboseMods = document.getElementById("mods-verbose-container");
-        const cur = verboseMods.querySelector(`[data-user_id="${user_id}"]`)
-        const template = document.getElementById("player-mods-verbose");
-        const mod_template = document.getElementById("player-mod-item")
-        const clone = template.content.cloneNode(true);
-        const mod_div = cur != null ? cur : clone.querySelector(".mods-container")
-        const mod_list = mod_div.querySelector(".mods-list")
-        let user_div = mod_div.querySelector(".mods-user")
-        let empty = true
-        mod_list.innerHTML = ""
-        for (const mod of mods) {
-            let res = this.#addModSettingUI(mod_list, mod, mod_template)
-            empty = empty && res.empty
-            let undefault_settings = res.undefault_settings
-            if (undefault_settings) user_div.textContent = user != undefined ? user.user.username : user_id
-        }
-        if (empty) {
-            if (cur != null) cur.remove() // delete it if previously modded
-            return;
-        }
-        mod_div.dataset.user_id = user_id
-        if (cur == null) verboseMods.appendChild(clone)
-    }
-
-    async #addPlayerStyle(user_id, style) {
-        const cur = Object.values(this.playlistItems).find(x => x.order == 0)
-        if (!cur?.freestyle) return // only matters with freestyle
-        const beatmap_id = style?.beatmap_id ?? cur.beatmap_id // null = item default
-        if (!beatmap_id) return
-        const beatmap = await GetBeatmap(beatmap_id)
-        if (this.disposed) return
-        const styleDiv = document.querySelector(`[data-user_id="${user_id}"] .player-style`)
-        if (styleDiv) styleDiv.textContent = `[${beatmap.version}] ${beatmap.difficulty_rating.toFixed(2)}★`
-    }
+    saveLocal() { saveRoomLocal(this.id, this.local) }
 
     updateUI() {
         if (this.disposed) return
-
-        // Players
-        console.log("Updating UI")
-        document.getElementById("player-list").innerHTML = ''
-        for (const pid of this.player_slots) { // ordered properly
-            const player = this.players[pid] ?? this.refs[pid]
-            if (!pid || !player) { // empty slot
-                const template = document.getElementById("empty-slot")
-                const clone = template.content.cloneNode(true);
-                document.getElementById("player-list").appendChild(clone)
-            } else {
-                this.#addPlayer(player.id, player.status, player.user.username, player.team)
-                const playerDiv = document.querySelector(`[data-user_id="${player.id}"]`)
-                let mod_str = player.mods.map(item => item.acronym).join(" ")
-                playerDiv.querySelector(".player-mods").textContent = mod_str ? mod_str : "N/A"
-                this.#addVerboseMods(player.id, player.mods)
-                this.#addPlayerStyle(player.id, player.style)
-            }
-        }
-
-        // Room Settings
-        document.getElementById('room-name').textContent = this.name
-        document.getElementById('cur-match-type').textContent = this.type
-        document.getElementById('settings-name').value = this.name
-        document.getElementById('settings-password').value = this.password
-        document.getElementById('settings-maximum-participants').value = this.max_participants
-        document.getElementsByName("match_type")[0].checked = this.type == "head_to_head"
-        document.getElementsByName("match_type")[1].checked = this.type != "head_to_head"
-        
-        // Required Mods
-        let cur = Object.values(this.playlistItems).filter(y => y.order == 0)[0];
-        const req_mods_div = document.getElementById('req-verbose-mods')
-        const mod_list = req_mods_div.querySelector(".mods-list")
-        const mod_template = document.getElementById("player-mod-item")
-        mod_list.innerHTML = ""
-        if (cur != undefined) { // only happens during inbetween but
-            for (const mod of cur.required_mods) {
-                this.#addModSettingUI(mod_list, mod, mod_template)
-            }
-        }
-        // Match State
-        document.getElementById('toggle-lock-btn').textContent = this.locked ? "Locked" : "Unlocked"
-
-        // Playlist Items
-        document.getElementById("playlist-items").innerHTML = ""
-        for (const playlist_item of Object.values(this.playlistItems)) {
-            this.#addPlaylistItem(playlist_item.id, playlist_item.ruleset_id, playlist_item.beatmap_id, playlist_item.required_mods, playlist_item.allowed_mods, playlist_item.freestyle)
-        }
-
-        // Match Status
-        document.getElementById('cur-match-status').textContent = this.status
+        this.onChange(this)
     }
     dispose() {
         this.disposed = true
     }
     close() {
         this.dispose()
-        document.getElementById("playlist-items").innerHTML = ""
-        const req_mods_div = document.getElementById('req-verbose-mods')
-        req_mods_div.querySelector(".mods-list").innerHTML = ""
-        document.getElementById("player-list").innerHTML = ''
-        hideRoomActions()
-        document.getElementById('room-setup').classList.remove('hidden')
-
-        document.getElementById("chat-messages").innerHTML = '<div id="no-messages" class="text-gray-500 dark:text-gray-400 text-sm italic">No messages yet...</div>'
+        this.onClose(this)
     }
 }
 
@@ -393,109 +166,140 @@ export class EventQueue {
             })
     }
 
-    async #queueLoop() { // TODO maybe add a flag for if we want to update UI
+    async #queueLoop() {
         this.processing = true
         while (this.active && this.arr.length > 0) {
             const ev = this.arr.shift()
             this.currentEvent = ev
             const data = ev.data
+            const room = this.room
             switch (ev.name) {
             case "UserJoined": {
-                const user = await this.room.GetUser(data.user_id, true)
-                console.log(user.user.username, "has joined!!")
-                //addPlayer(info.user_id, "idle", user.user.username, "none")
-                this.room.players[data.user_id].status = "idle"
-                this.room.players[data.user_id].team = "none"
-                if (!this.room.max_participants) this.room.player_slots.push(data.user_id)
+                const user = await room.GetUser(data.user_id, true)
+                room.players[data.user_id].status = "idle"
+                room.players[data.user_id].team = "none"
+                if (!room.max_participants && !room.player_slots.includes(data.user_id)) room.player_slots.push(data.user_id)
+                addSystemMsg(`${user.user.username} joined the room`)
             } break;
             case "UserLeft": {
-                delete this.room.players[data.user_id]
-                if (!this.room.max_participants) this.room.player_slots = this.room.player_slots.filter(x => x != data.user_id)
+                const name = room.players[data.user_id]?.user?.username
+                delete room.players[data.user_id]
+                if (!room.max_participants) room.player_slots = room.player_slots.filter(x => x != data.user_id)
+                if (name) addSystemMsg(`${name} left the room`)
             } break;
-            case "UserKicked": {
-                if (data.kicked_user_id == window.me.id) {
-                    this.room.close()
+            case "UserKicked":
+            case "UserBanned": {
+                const uid = data.kicked_user_id ?? data.banned_user_id ?? data.user_id
+                if (uid == window.me?.id) {
+                    room.close()
                     this.dispose()
+                    break
                 }
-                delete this.room.players[data.kicked_user_id]
-                if (!this.room.max_participants) this.room.player_slots = this.room.player_slots.filter(x => x != data.kicked_user_id)
+                const name = room.players[uid]?.user?.username
+                delete room.players[uid]
+                if (!room.max_participants) room.player_slots = room.player_slots.filter(x => x != uid)
+                if (name) addSystemMsg(`${name} was ${ev.name === 'UserBanned' ? 'banned' : 'kicked'}`, 'warn')
+            } break;
+            case "RefereeAdded": {
+                const uid = data.user_id ?? data.target_user_id
+                if (uid != null) { const u = await room.GetUser(uid, false); addSystemMsg(`${u.user.username} is now a referee`) }
+            } break;
+            case "RefereeRemoved": {
+                const uid = data.user_id ?? data.target_user_id
+                const name = room.refs[uid]?.user?.username
+                delete room.refs[uid]
+                if (name) addSystemMsg(`${name} is no longer a referee`)
             } break;
             case "RoomSettingsChanged": {
-                this.room.name = data.name
-                this.room.password = data.password
-                this.room.type = data.type
-                this.room.max_participants = data.max_participants
-                if (data.max_participants == null) this.room.player_slots = this.room.player_slots.filter(x => x != null)
+                room.name = data.name
+                room.password = data.password
+                room.type = data.type
+                room.max_participants = data.max_participants
+                if (data.max_participants == null) room.player_slots = room.player_slots.filter(x => x != null)
             } break;
             case "MatchStateChanged": {
-                this.room.locked = data.state.locked;
-                this.room.type = data.state.type
-                if (data.state.slots) this.room.player_slots = data.state.slots
+                room.locked = data.state.locked;
+                room.type = data.state.type
+                if (data.state.slots) room.player_slots = data.state.slots
             } break;
             case "PlaylistItemAdded": {
                 if (data.playlist_item.was_played) {
-                    delete this.room.playlistItems[data.playlist_item.id]
+                    room.playedItems[data.playlist_item.id] = { ...room.playlistItems[data.playlist_item.id], ...data.playlist_item }
+                    delete room.playlistItems[data.playlist_item.id]
                 } else {
-                    this.room.playlistItems[data.playlist_item.id] = data.playlist_item
+                    room.playlistItems[data.playlist_item.id] = data.playlist_item
                 }
             } break;
             case "PlaylistItemChanged": {
                 if (data.playlist_item.was_played) {
-                    delete this.room.playlistItems[data.playlist_item.id]
+                    room.playedItems[data.playlist_item.id] = { ...room.playlistItems[data.playlist_item.id], ...data.playlist_item }
+                    delete room.playlistItems[data.playlist_item.id]
                 } else {
-                    const existing = this.room.playlistItems[data.playlist_item.id] ?? {}
-                    this.room.playlistItems[data.playlist_item.id] = {
+                    const existing = room.playlistItems[data.playlist_item.id] ?? {}
+                    room.playlistItems[data.playlist_item.id] = {
                         ...existing,
                         ...data.playlist_item
                     }
                 }
             } break;
             case "PlaylistItemRemoved": {
-                delete this.room.playlistItems[data.playlist_item_id]
+                delete room.playlistItems[data.playlist_item_id]
             } break;
             case "UserStatusChanged": {
-                this.room.players[data.user_id].status = data.status
-                if (Object.values(this.room.players).every(p => p.status == "ready")) {
-                    // maybe make this not do UI stuff but chat is whatevs rn
-                    addSystemMsg("All Players are ready")
+                if (room.players[data.user_id]) room.players[data.user_id].status = data.status
+                if (room.allReady() && (room.status === 'idle' || room.status === 'results') && !room.allReadyFlag) {
+                    room.allReadyFlag = true
+                    addSystemMsg("All players are ready", 'alert')
+                    room.onAllReady()
                 }
+                if (!room.allReady()) room.allReadyFlag = false
             } break;
             case "UserModsChanged": {
-                this.room.players[data.user_id].mods = data.mods
+                if (room.players[data.user_id]) room.players[data.user_id].mods = data.mods
             } break;
             case "UserStyleChanged": {
-                // yeah i continue to question your sanity
-                // if you need this for your tournament
-                const player = this.room.players[data.user_id]
+                const player = room.players[data.user_id]
                 // flat here, nested on join
                 if (player) player.style = { beatmap_id: data.beatmap_id, ruleset_id: data.ruleset_id }
             } break;
             case "UserTeamChanged": {
-                this.room.players[data.user_id].team = data.team
+                if (room.players[data.user_id]) room.players[data.user_id].team = data.team
             } break;
-            case "CountdownStarted":
-            case "CountdownStopped":
-                break;
+            case "CountdownStarted": {
+                if (data.type == null || data.type === 'match_start') {
+                    room.countdown = { id: data.countdown_id, total: data.seconds, remaining: data.seconds }
+                    room.status = 'countdown'
+                }
+            } break;
+            case "CountdownStopped": {
+                if (room.countdown && (data.countdown_id == null || data.countdown_id === room.countdown.id)) {
+                    room.countdown = null
+                    if (room.status === 'countdown') room.status = 'idle'
+                    addSystemMsg('Match countdown cancelled')
+                }
+            } break;
             case "MatchStarted": {
-                this.room.status = "Playing"
+                room.countdown = null
+                room.status = "playing"
+                room.allReadyFlag = false
+                addSystemMsg('Match started', 'alert')
             } break;
             case "MatchAborted": {
-                this.room.status = "Aborted"
+                room.countdown = null
+                room.status = "idle"
+                addSystemMsg('Match aborted', 'warn')
             } break;
             case "MatchCompleted": {
-                this.room.status = "Idle"
+                room.status = "results"
+                room.onMatchCompleted(data.playlist_item_id)
             } break;
             case "RollCompleted": {
-                // Again i don't love doing UI changes here but
-                // chat stuff is ephemeral rn anyways so
-                // TODO: store chat messages somewhere and also figure out the
-                // flow to get the previous messages
-                let user = await this.room.GetUser(data.user_id)
+                let user = await room.GetUser(data.user_id)
                 addSystemMsg(`${user.user.username} rolled ${data.result}/${data.max}`)
             } break;
             }
-            this.room.updateMode()
-            this.room.updateUI()
+            room.updateMode()
+            room.updateUI()
         }
     }
 }

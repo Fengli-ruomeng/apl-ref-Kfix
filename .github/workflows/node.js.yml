@@ -62,6 +62,9 @@ jobs:
       - name: Install current Electron runtime
         run: node node_modules/electron/install.js
 
+      - name: Run regression tests
+        run: npm test
+
       - name: Build assets
         run: npm run build:assets
 

@@ -2,7 +2,7 @@ const { app, BrowserWindow, shell } = require('electron')
 const path = require('path')
 const { RefereeClient, SPECTATOR_SERVER_URL } = require('../referee')
 const { setupIpcHandlers, setupWSEvents } = require('./ipc')
-const { getAccessToken } = require('../auth')
+const { getAccessToken, refreshAccessToken } = require('../auth')
 const { configure, getConsoleSink, getLogger } = require("@logtape/logtape")
 const { getFileSink } = require("@logtape/file");
 
@@ -10,6 +10,9 @@ const fs = require('fs')
 const userDataPath = app.getPath('userData');
 
 const LOG_PATH = path.join(userDataPath, 'apl-ref.log')
+// APL_MOCK=1 runs the renderer against preload.mock.js (no login, no network).
+// APL_SHOT=<file.png> saves a screenshot of the window a few seconds after load.
+const MOCK = !!process.env.APL_MOCK && !app.isPackaged
 
 let mainWindow = null
 let refereeClient = null
@@ -21,7 +24,7 @@ function createMainWindow() {
         autoHideMenuBar: true,
         webPreferences: {
             blinkFeatures: 'OverlayScrollbars',
-            preload: path.join(__dirname, '..', '..', 'preload.js'),
+            preload: path.join(__dirname, '..', '..', MOCK ? 'preload.mock.js' : 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false
         },
@@ -30,7 +33,22 @@ function createMainWindow() {
     // TODO: if someone wants to make this work on macOS go ahead
     if (process.platform !== 'darwin' && app.isPackaged) mainWindow.removeMenu()
 
-    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'))
+    // renderer console errors go to the log file too (uncaught module errors never reach window.console.error)
+    mainWindow.webContents.on('console-message', (ev, level, message, line, source) => {
+        const d = ev && typeof ev === 'object' && ev.message != null ? ev : { level, message, lineNumber: line, sourceId: source }
+        const lvl = typeof d.level === 'string' ? d.level : ['debug', 'info', 'warning', 'error'][d.level] ?? 'info'
+        if (lvl === 'error' || lvl === 'warning') getLogger(['apl-ref', 'renderer'])[lvl === 'error' ? 'error' : 'warn']('{message} ({source}:{line})', { message: d.message, source: d.sourceId, line: d.lineNumber })
+    })
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'), process.env.APL_MOCK_JOIN ? { query: { mockjoin: '1' } } : undefined)
+    if (process.env.APL_SHOT) {
+        mainWindow.webContents.once('did-finish-load', () => setTimeout(async () => {
+            // APL_SHOT_SCRIPT runs in the renderer first (dev only), so a flow can be driven before capturing
+            if (process.env.APL_SHOT_SCRIPT) await mainWindow.webContents.executeJavaScript(process.env.APL_SHOT_SCRIPT).catch(err => console.error('APL_SHOT_SCRIPT failed:', err))
+            const img = await mainWindow.webContents.capturePage()
+            fs.writeFileSync(process.env.APL_SHOT, img.toPNG())
+            if (process.env.APL_SHOT_QUIT) app.quit()
+        }, Number(process.env.APL_SHOT_DELAY) || 3000))
+    }
 }
 
 // Opens a small window that navigates directly to the osu! OAuth URL.
@@ -84,8 +102,9 @@ async function initializeApp(accessToken) {
     app.on('window-all-closed', async () => {
         await cleanup()
     })
-    let ws_close = setupWSEvents(accessToken, sendToRenderer)
+    let ws_close = setupWSEvents(refreshAccessToken, sendToRenderer)
     refereeClient = new RefereeClient(SPECTATOR_SERVER_URL, accessToken, sendToRenderer, ws_close)
+    refereeClient.tokenProvider = refreshAccessToken
 
     try {
         await refereeClient.connect()
@@ -100,6 +119,7 @@ async function initializeApp(accessToken) {
 
 async function cleanup() {
     if (refereeClient) {
+        refereeClient.ws_close?.()
         await refereeClient.disconnect()
     }
     if (process.platform !== 'darwin') app.quit()
@@ -134,6 +154,13 @@ function start() {
         const logger  = getLogger (["apl-ref"]);
         try {
             logger.info("===== new session started =====")
+            if (MOCK) {
+                logger.warn('APL_MOCK set: running against preload.mock.js, no osu! connection')
+                createMainWindow()
+                app.removeAllListeners('window-all-closed')
+                app.on('window-all-closed', () => app.quit())
+                return
+            }
             const accessToken = await getAccessToken(createLoginWindow, createConfigPopup)
             logger.debug("accessToken obtained")
             await initializeApp(accessToken)

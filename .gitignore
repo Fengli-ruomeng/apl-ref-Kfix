@@ -1,4 +1,5 @@
 node_modules/
+prototype/
 config.json
 token.json
 scripts/IRefereeHubServer.cs

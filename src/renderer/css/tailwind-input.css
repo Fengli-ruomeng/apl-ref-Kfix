@@ -300,11 +300,26 @@ select.input { padding-right: 1.5rem; }
 @starting-style { .evt { opacity: 0; translate: 0 -4px; } }
 .evt.leave { opacity: 0; }
 
-/* ── queue drawer below xl ──────────────────────────────────────────── */
-@media (max-width: 1279px) {
-  #col-queue { position: fixed; top: 3rem; bottom: 0; right: 0; width: 20rem; max-width: 92vw; z-index: 30; box-shadow: var(--shadow); transform: translateX(105%); transition: transform .22s ease; }
-  #col-queue.open { transform: none; }
+/* One state controls the queue at every width. Keep breakpoints in rem,
+   consistent with Tailwind, and do not rely on utility display overrides. */
+#view-room { display: grid; grid-template-columns: 15rem minmax(0, 1fr); }
+#topbar { z-index: 40; }
+#col-queue { position: fixed; top: 3rem; bottom: 0; right: 0; width: 20rem; max-width: 92vw; z-index: 30; box-shadow: var(--shadow); animation: queue-enter .18s ease-out; }
+.queue-backdrop { position: fixed; inset: 3rem 0 0; z-index: 29; background: hsl(335 30% 4% / .4); }
+@keyframes queue-enter { from { opacity: 0; transform: translateX(1rem); } to { opacity: 1; transform: none; } }
+@media (min-width: 80rem) {
+  #view-room { grid-template-columns: 17rem minmax(0, 1fr); }
+  #view-room[data-queue-open="true"] { grid-template-columns: 17rem minmax(0, 1fr) 20rem; }
+  #col-queue { position: static; width: auto; max-width: none; box-shadow: none; animation: none; z-index: auto; }
 }
+@media (min-width: 96rem) {
+  #view-room { grid-template-columns: 18.75rem minmax(0, 1fr); }
+  #view-room[data-queue-open="true"] { grid-template-columns: 18.75rem minmax(0, 1fr) 22.5rem; }
+}
+#btn-freestyle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, var(--surface-2)); }
+.referee-invitations { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; padding: .5rem .75rem; border-bottom: 1px solid var(--line); background: var(--surface-2); flex: none; max-height: 8rem; overflow: auto; }
+.referee-invitations > div:first-child { display: flex; flex-direction: column; font-size: .75rem; }
+.referee-invitations > div:first-child span { color: var(--muted); font-size: .6875rem; }
 
 /* ── dialogs / toasts ───────────────────────────────────────────────── */
 dialog { position: fixed; inset: 0; margin: auto; border: 0; padding: 0; background: transparent; color: inherit; max-width: min(92vw, 34rem); width: 100%; opacity: 0; transform: translateY(8px) scale(.98); transition: opacity .18s ease, transform .18s ease, overlay .18s allow-discrete, display .18s allow-discrete; }
@@ -318,6 +333,7 @@ dialog[open]::backdrop { opacity: 1; }
 
 #toasts { position: fixed; left: 50%; bottom: 1rem; translate: -50% 0; display: flex; flex-direction: column; align-items: center; gap: .5rem; z-index: 100; pointer-events: none; }
 .toast { background: var(--ink); color: var(--surface-0); font-size: .8125rem; font-weight: 500; padding: .5rem .875rem; box-shadow: var(--shadow); transition: opacity .25s, translate .25s; }
+.toast { max-width: min(42rem, calc(100vw - 2rem)); overflow-wrap: anywhere; }
 @starting-style { .toast { opacity: 0; translate: 0 8px; } }
 .toast.leave { opacity: 0; translate: 0 8px; }
 

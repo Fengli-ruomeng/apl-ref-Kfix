@@ -25,6 +25,8 @@ ipcRenderer.invoke('get-api-data').then(([CMDS_SET, EVENTS, version]) => {
     const listeners = {}
     let chatCb = null
     let room = null
+    let isHost = true, recipientConnected = true
+    const availableRooms = new Set([1487223])
     let itemSeq = 100, cdSeq = 0
     let timers = []
     const clearTimers = () => { timers.forEach(clearTimeout); timers = [] }
@@ -72,10 +74,10 @@ ipcRenderer.invoke('get-api-data').then(([CMDS_SET, EVENTS, version]) => {
         }
         return snapshot()
     }
-    function joinRoom() {
+    function joinRoom(roomId = 1487223) {
         clearTimers()
         room = {
-            room_id: 1487223, chat_channel_id: 61987707, name: 'APL: (Averagegal) vs (submissive cat)', password: 'apl',
+            room_id: roomId, chat_channel_id: 61987707, name: 'APL: (Averagegal) vs (submissive cat)', password: 'apl',
             playlist: [
                 item(3398826, 0, { order: 0 }), item(1003651, 0, { order: 1, required_mods: [{ acronym: 'HD' }] }),
                 item(2626718, 0, { order: 2, required_mods: [{ acronym: 'DT', settings: { speed_change: 1.5 } }] }),
@@ -110,14 +112,26 @@ ipcRenderer.invoke('get-api-data').then(([CMDS_SET, EVENTS, version]) => {
     Object.assign(send, {
         Ping: async msg => ok(msg),
         MakeRoom: async req => ok(makeRoom(req)),
-        JoinRoom: async () => ok(joinRoom()),
+        JoinRoom: async id => availableRooms.has(id) ? ok(joinRoom(id)) : fail('No referee access to this room'),
         CloseRoom: async () => { clearTimers(); room = null; return ok(null) },
-        ListRooms: async () => ok([]),
+        ListRooms: async () => ok({ room_ids: [...availableRooms] }),
         InvitePlayer: async (_, uid) => { need(); if (!USERS[uid]) USERS[uid] = { id: uid, username: `user${uid}`, avatar_url: '' }; later(1500, () => room && addPlayer(uid)); return ok(null) },
         KickPlayer: async (_, uid) => { need(); removePlayer(uid, 'UserKicked', 'kicked_user_id'); return ok(null) },
         BanUser: async (_, uid) => { need(); removePlayer(uid, 'UserKicked', 'kicked_user_id'); return ok(null) },
-        AddReferee: async (_, uid) => { need(); if (!room.referees.some(r => r.user_id === uid)) room.referees.push({ user_id: uid }); emit('RefereeAdded', { user_id: uid }); return ok(null) },
-        RemoveReferee: async (_, uid) => { need(); room.referees = room.referees.filter(r => r.user_id !== uid); emit('RefereeRemoved', { user_id: uid }); return ok(null) },
+        AddReferee: async (_, uid) => {
+            need()
+            if (uid === ME) return fail('Error 15: Cannot perform this operation on self.')
+            if (!isHost) return fail('Error 18: You are not the host of the room.')
+            if (!recipientConnected) return fail("An unexpected error occurred invoking 'AddReferee' on the server.")
+            if (!room.referees.some(r => r.user_id === uid)) room.referees.push({ user_id: uid })
+            emit('RefereeAdded', { user_id: uid }); return ok(null)
+        },
+        RemoveReferee: async (_, uid) => {
+            need()
+            if (!isHost) return fail('Error 18: You are not the host of the room.')
+            if (uid === ME) return fail('Error 15: Cannot perform this operation on self.')
+            room.referees = room.referees.filter(r => r.user_id !== uid); emit('RefereeRemoved', { user_id: uid }); return ok(null)
+        },
         ChangeRoomSettings: async (_, req) => {
             need()
             if (req.name != null) room.name = req.name
@@ -187,6 +201,9 @@ ipcRenderer.invoke('get-api-data').then(([CMDS_SET, EVENTS, version]) => {
 
     const mock = {
         trigger(kind) {
+            if (kind === 'refinvite') { availableRooms.add(1487333); emit('RefereeInvited', { room_id: 1487333 }); return }
+            if (kind === 'refhost') { isHost = !isHost; return { message: `Mock room host: ${isHost ? 'yes' : 'no'}` } }
+            if (kind === 'refoffline') { recipientConnected = !recipientConnected; return { message: `Mock referee recipient: ${recipientConnected ? 'connected' : 'offline'}` } }
             if (!room) return
             const ids = room.players.map(p => p.user_id)
             const pool = Object.keys(USERS).map(Number).filter(id => id < 900 && !ids.includes(id))

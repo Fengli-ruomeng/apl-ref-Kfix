@@ -40,7 +40,7 @@
 
     <div class="flex items-center gap-1 shrink-0">
       <div id="tb-conn" class="flex items-center gap-2 text-xs text-muted px-2" data-on="true"><span class="conn-dot"></span><span id="tb-conn-text" class="hidden md:inline">Connecting…</span></div>
-      <button id="tb-queue" class="room-only btn btn-icon btn-ghost xl:hidden" title="Map queue"><i data-icon="panel"></i></button>
+      <button id="tb-queue" class="room-only btn btn-ghost" title="Map queue" aria-label="Map queue" aria-controls="col-queue" aria-expanded="false"><i data-icon="panel"></i><span class="hidden sm:inline">Queue</span></button>
       <button id="tb-resync" class="room-only btn btn-ghost" title="Reconnect and reload room state"><i data-icon="refresh"></i><span class="hidden xl:inline">Resync</span></button>
       <button id="tb-settings" class="room-only btn btn-ghost" title="Room settings"><i data-icon="sliders"></i><span class="hidden xl:inline">Settings</span></button>
       <div class="room-only relative">
@@ -60,6 +60,8 @@
           <div class="sim-grid">
             <button data-sim="join">Player joins</button><button data-sim="leave">Player leaves</button>
             <button data-sim="ready">Toggle a ready</button><button data-sim="allready">Everyone ready</button>
+            <button data-sim="refinvite">Receive referee invite</button><button data-sim="refhost">Toggle room host role</button>
+            <button data-sim="refoffline">Toggle referee recipient offline</button>
             <button data-sim="chat">Incoming chat</button><button data-sim="mods">Player changes mods</button>
           </div>
         </div>
@@ -69,8 +71,14 @@
   </header>
   <div id="conn-banner" hidden>Connection to the referee server was lost. Reconnecting…</div>
 
+  <section id="referee-invitations" class="referee-invitations" aria-label="Referee invitations" hidden>
+    <div><strong>Referee access available</strong><span>Join a room to use its referee controls.</span></div>
+    <div id="referee-room-list" class="flex gap-2 flex-wrap"></div>
+    <button id="referee-refresh" class="btn btn-sm btn-ghost" type="button">Refresh rooms</button>
+  </section>
+
   <!-- ── room view ───────────────────────────────────────────────── -->
-  <div id="view-room" class="flex-1 min-h-0 grid grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[272px_minmax(0,1fr)_320px] 2xl:grid-cols-[300px_minmax(0,1fr)_360px]" hidden>
+  <div id="view-room" class="flex-1 min-h-0" hidden>
 
     <aside id="col-players" class="min-h-0 flex flex-col border-r border-line bg-surface-1">
       <div class="h-10 shrink-0 flex items-center gap-2 px-3 border-b border-line">
@@ -111,6 +119,7 @@
               <button id="btn-timer" class="btn btn-soft btn-attached"><i data-icon="timer" data-icon-class="icon-sm"></i>Timer</button>
               <div id="seg-timer" class="seg" title="Timer seconds"></div>
             </div>
+            <button id="btn-freestyle" class="btn btn-soft" type="button" aria-pressed="false" title="Freestyle lets players choose their own difficulty; it is independent of Freemod."><span id="freestyle-label">Freestyle: Off</span></button>
           </div>
         </div>
         <div id="now-map"></div>
@@ -157,12 +166,13 @@
       </section>
     </main>
 
-    <aside id="col-queue" class="min-h-0 flex flex-col border-l border-line bg-surface-1">
+    <button id="queue-backdrop" class="queue-backdrop" type="button" aria-label="Dismiss map queue" hidden></button>
+    <aside id="col-queue" class="min-h-0 flex flex-col border-l border-line bg-surface-1" aria-label="Map queue panel">
       <div class="h-10 shrink-0 flex items-center gap-2 px-3 border-b border-line">
         <span class="panel-title">Map queue</span><span id="queue-count" class="font-mono text-[11px] text-muted"></span>
         <div class="flex-1"></div>
         <button id="btn-addmap" class="btn btn-icon btn-sm btn-ghost" title="Add map"><i data-icon="plus" data-icon-class="icon-sm"></i></button>
-        <button id="btn-queue-close" class="btn btn-icon btn-sm btn-ghost xl:hidden" title="Close"><i data-icon="x" data-icon-class="icon-sm"></i></button>
+        <button id="btn-queue-close" class="btn btn-icon btn-sm btn-ghost" title="Close map queue" aria-label="Close map queue"><i data-icon="x" data-icon-class="icon-sm"></i></button>
       </div>
       <div id="queue-list" class="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col gap-1.5"></div>
       <div id="events" class="shrink-0 border-t border-line flex flex-col max-h-[45%]">
@@ -200,6 +210,7 @@
             <button id="join-room-btn" class="btn btn-soft shrink-0">Join</button>
           </div>
           <p class="text-xs text-muted">Requires referee access to the room.</p>
+          <button id="find-referee-rooms" class="btn btn-sm btn-ghost self-start" type="button">Find my referee rooms</button>
           <span class="result-msg" id="join-room-result"></span>
         </section>
       </div>

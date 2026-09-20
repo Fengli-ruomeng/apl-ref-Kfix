@@ -3,31 +3,8 @@
 // !mp runner in index.js stays the single source of truth.
 import { $, h, put, toast, confirmUI } from './ui/dom.js'
 
-export const CMD_DEFS = [
-    { g: 'Match', n: 'start', d: 'Start the match after a countdown', p: [{ k: 'seconds', l: 'Countdown (seconds, 0 = now)', t: 'number', v: 10 }] },
-    { g: 'Match', n: 'abort', d: 'Abort the running match', danger: true },
-    { g: 'Match', n: 'timer', d: 'Start a chat countdown', p: [{ k: 'seconds', l: 'Seconds', t: 'number', v: 90 }] },
-    { g: 'Match', n: 'aborttimer', d: 'Stop the chat countdown' },
-    { g: 'Players', n: 'invite', d: 'Invite a player', p: [{ k: 'user', l: 'Username or #id', t: 'user' }] },
-    { g: 'Players', n: 'kick', d: 'Kick a player', p: [{ k: 'user', l: 'Player', t: 'player' }], danger: true },
-    { g: 'Players', n: 'ban', d: 'Ban a player from the room', p: [{ k: 'user', l: 'Player', t: 'player' }], danger: true },
-    { g: 'Players', n: 'team', d: 'Move a player to a team', p: [{ k: 'user', l: 'Player', t: 'player' }, { k: 'team', l: 'Team', t: 'select', o: [['red', 'Red'], ['blue', 'Blue']] }] },
-    { g: 'Players', n: 'move', d: 'Move a player to a slot', p: [{ k: 'user', l: 'Player', t: 'player' }, { k: 'slot', l: 'Slot number', t: 'number', v: 1 }] },
-    { g: 'Room', n: 'name', d: 'Rename the room', p: [{ k: 'name', l: 'Room name', t: 'text' }] },
-    { g: 'Room', n: 'password', d: 'Set or clear the password', p: [{ k: 'password', l: 'Password (empty = none)', t: 'text', opt: true }] },
-    { g: 'Room', n: 'size', d: 'Set the number of slots', p: [{ k: 'slots', l: 'Slots', t: 'number', v: 8 }] },
-    { g: 'Room', n: 'set', d: 'Set team mode and size', p: [{ k: 'mode', l: 'Mode', t: 'select', o: [['0', 'Head-to-head'], ['1', 'Team versus']] }, { k: 'size', l: 'Slots (optional)', t: 'number', opt: true }] },
-    { g: 'Room', n: 'lock', d: 'Lock teams and slots' },
-    { g: 'Room', n: 'unlock', d: 'Unlock teams and slots' },
-    { g: 'Map', n: 'map', d: 'Change the current map', p: [{ k: 'beatmap', l: 'Beatmap ID', t: 'number' }, { k: 'ruleset', l: 'Ruleset (optional)', t: 'select', o: [['', 'Keep current'], ['0', 'osu!'], ['1', 'taiko'], ['2', 'catch'], ['3', 'mania']], opt: true }] },
-    { g: 'Map', n: 'mods', d: 'Set required mods (FM = freemod, NM = none)', p: [{ k: 'mods', l: 'Mods', t: 'text', ph: 'HD HR   |   FM   |   NM   |   DT[1.5]' }] },
-    { g: 'Map', n: 'allowed_mods', d: 'Set the allowed (free) mods', p: [{ k: 'mods', l: 'Mods', t: 'text', ph: 'HD HR EZ FL' }] },
-    { g: 'Referees', n: 'addref', d: 'Add a referee', p: [{ k: 'user', l: 'Username or #id', t: 'user' }] },
-    { g: 'Referees', n: 'removeref', d: 'Remove a referee', p: [{ k: 'user', l: 'Username or #id', t: 'user' }] },
-    { g: 'Other', n: 'roll', root: '!roll', d: 'Roll a random number', p: [{ k: 'max', l: 'Maximum', t: 'number', v: 100 }] },
-    { g: 'Other', n: 'close', d: 'Close the room', danger: true },
-]
-export const cmdRoot = d => d.root || `!mp ${d.n}`
+import { CMD_DEFS, cmdRoot } from './commands.js'
+export { CMD_DEFS, cmdRoot } from './commands.js'
 
 // ctx: { players() -> [{id, username}], runCommand(text) }
 export function createCommandUI(ctx) {
@@ -83,7 +60,6 @@ export function createCommandUI(ctx) {
             openPanel(false)
             try { await ctx.runCommand(cmd) } catch (error) { toast(error.message, 5000) }
         }
-        refresh()
         put($('#cmd-detail'),
             h('div', {}, h('div', { class: 'font-mono font-semibold text-sm' }, cmdRoot(def), ...(def.p || []).map(prm => h('span', { class: 'text-muted font-normal' }, ` <${prm.k}${prm.opt ? '?' : ''}>`))), h('div', { class: 'text-xs text-muted mt-0.5' }, def.d)),
             ...(def.p || []).map(field),
@@ -91,6 +67,7 @@ export function createCommandUI(ctx) {
             h('div', { class: 'flex justify-end gap-2 mt-auto' },
                 h('button', { class: 'btn btn-sm btn-soft', onclick: () => { input.value = buildCmd(def, vals); openPanel(false); input.focus(); acUpdate() } }, 'Insert into input'),
                 h('button', { class: 'btn btn-sm ' + (def.danger ? 'btn-danger' : 'btn-primary'), onclick: run }, 'Run')))
+        refresh()
     }
 
     // ── autocomplete ──
@@ -100,12 +77,12 @@ export function createCommandUI(ctx) {
         const typing = toks[toks.length - 1].toLowerCase()
         const base = text.replace(/\S*$/, '')
         const row = (label, hint, insert) => ({ label, hint, insert })
-        if (toks.length === 1) return { items: ['!mp', '!roll'].filter(r => r.startsWith(typing)).map(r => row(r, r === '!mp' ? 'Referee commands' : 'Roll a random number', r + ' ')) }
+        if (toks.length === 1) return { items: ['!mp', '!roll', '/roll'].filter(r => r.startsWith(typing)).map(r => row(r, r === '!mp' ? 'Referee commands' : 'Roll a random number', r + ' ')) }
         let def, idx
         if (toks[0].toLowerCase() === '!mp') {
-            if (toks.length === 2) return { items: CMD_DEFS.filter(d => !d.root && d.n.startsWith(typing)).map(d => row(d.n, d.d, `!mp ${d.n} `)) }
-            def = CMD_DEFS.find(d => !d.root && d.n === toks[1].toLowerCase()); idx = toks.length - 3
-        } else { def = CMD_DEFS.find(d => d.root === toks[0].toLowerCase()); idx = toks.length - 2 }
+            if (toks.length === 2) return { items: CMD_DEFS.filter(d => (!d.root || d.mpAlias) && d.n.startsWith(typing)).map(d => row(d.n, d.d, `!mp ${d.n} `)) }
+            def = CMD_DEFS.find(d => (!d.root || d.mpAlias) && d.n === toks[1].toLowerCase()); idx = toks.length - 3
+        } else { def = CMD_DEFS.find(d => d.root === toks[0].toLowerCase() || d.aliases?.includes(toks[0].toLowerCase())); idx = toks.length - 2 }
         if (!def) return null
         const prm = def.p?.[idx]
         let items = []

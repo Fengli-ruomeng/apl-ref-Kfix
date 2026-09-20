@@ -162,6 +162,11 @@ export function renderMatch(room, ctx) {
     start.title = start.disabled ? (busy ? 'Match in progress' : 'Add a map to the queue first') : (room.allReady() ? 'All players ready' : 'Start match')
     $('#btn-abort').disabled = !busy
     $('#abort-label').textContent = room.status === 'countdown' ? 'Cancel' : 'Abort'
+    const freestyle = $('#btn-freestyle')
+    const enabled = !!room.currentItem()?.freestyle
+    freestyle.setAttribute('aria-pressed', String(enabled))
+    freestyle.disabled = busy || !hasMap || !!ctx.ui.freestylePending
+    $('#freestyle-label').textContent = ctx.ui.freestylePending ? 'Freestyle: Saving…' : `Freestyle: ${enabled ? 'On' : 'Off'}`
     renderNowMap(room, ctx)
 }
 export function renderNowMap(room, ctx) {

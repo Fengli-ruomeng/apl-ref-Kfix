@@ -9,6 +9,10 @@ import { createCommandUI } from './cmdpalette.js'
 import { buildResult, autoAward } from './tracking.js'
 import { requireSuccess } from './requests.js'
 import { beatmapInput, commandTokens, integerInput } from './inputs.js'
+import { runRefereeCommand } from './commands.js'
+import { resolveUserTarget, changeReferee } from './referees.js'
+import { createQueuePanel } from './ui/queue.js'
+import { createRefereeRooms } from './ui/referee-rooms.js'
 
 window.console.error = (...args) => {
     log.error(args.join(', '))
@@ -31,7 +35,7 @@ let room;
 let countdown_id; // interval of the local chat timer
 const prefs = loadPrefs()
 const macros = loadMacros()
-const ui = { historyOpen: false, eventsOpen: false }
+const ui = { historyOpen: false, eventsOpen: false, freestylePending: false }
 const ctx = {
     prefs, ui, connected: false,
     me: () => window.me ?? { username: '…', id: 0 },
@@ -66,6 +70,8 @@ function renderAll() {
 setBeatmapListener(() => { if (room) scheduleRender() })
 setEventsListener(() => renderEvents(events, ctx))
 
+const refereeRooms = createRefereeRooms({ getRoom: () => room, osu, install: installRoomSnapshot })
+
 function installRoomSnapshot(snapshot) {
     const nextRoom = new Room(snapshot)
     const nextQueue = new EventQueue(nextRoom)
@@ -74,6 +80,7 @@ function installRoomSnapshot(snapshot) {
     room?.dispose()
     room = nextRoom
     Queue = nextQueue
+    refereeRooms.render()
     stopLocalTimer(false)
 
     room.onChange = scheduleRender
@@ -92,6 +99,7 @@ function clearCurrentRoom() {
     Queue = null
     room?.dispose()
     room = null
+    refereeRooms.render()
     stopLocalTimer(false)
     clearChat()
     renderAll()
@@ -111,101 +119,20 @@ function resolveText(t) {
 }
 
 // ── !mp runner ────────────────────────────────────────────────────────
-async function ircStyleUsername(str) { // #14573534 for user id, username otherwise
-    str = String(str ?? '').trim()
-    if (!str) throw new Error('Choose a player or enter a username / #id')
-    if (str[0] == '#') {
-        return integerInput(str.substring(1), 'User ID', { min: 1 })
-    }
-    return (await room.GetUser(str)).id
+async function ircStyleUsername(token) {
+    if (!room) throw new Error('Join a room first')
+    return (await resolveUserTarget(token, room)).id
 }
-
-async function cmdRunner(room_id, cmd, ...args) {
-    const needs_resp = ["invite"]
-    const map = {
-        "name": () => {return osu.ChangeRoomSettings(room_id, {name: args.join(' ')})},
-        "invite": async () => {return osu.InvitePlayer(room_id, await ircStyleUsername(args.join(' ')))},
-        "lock": () => {return osu.SetLockState(room_id, {locked: true})},
-        "unlock": () => {return osu.SetLockState(room_id, {locked: false})},
-        "size": () => {return osu.ChangeRoomSettings(room_id, {max_participants: integerInput(args[0], 'Slots', { max: 16 })})},
-        "set": () => {
-            let size = args[2] ?? args[1] // scoremode doesn't exist yet bleh
-            if (size) size = parseInt(size)
-            return osu.ChangeRoomSettings(room_id, {type: args[0] == 0 ? "head_to_head" : "team_versus", max_participants: size})
-        },
-        "start": () => {return osu.StartMatch(room_id, {countdown: integerInput(args[0] ?? 0, 'Countdown')})},
-        "abort": () => {return osu.AbortMatch(room_id)},
-        "team": async () => {
-            const team = args.at(-1)?.toLowerCase()
-            if (!['red', 'blue'].includes(team)) throw new Error('Choose red or blue')
-            return osu.MoveUser(room_id, {user_id: await ircStyleUsername(args.slice(0, -1).join(' ')), team})
-        },
-        "move": async () => {return osu.MoveUser(room_id, {user_id: await ircStyleUsername(args.slice(0, -1).join(' ')), slot: integerInput(args.at(-1), 'Slot', { min: 1, max: 16 }) - 1})},
-        "map": () => {
-            const map = beatmapInput(args[0])
-            return osu.EditCurrentPlaylistItem(room_id, {beatmap_id: map.id, ruleset_id: args[1] == null ? (map.ruleset ?? room.mode) : integerInput(args[1], 'Ruleset', { max: 3 })})
-        },
-        "mods": async () => {
-            const modes = await modsReady
-            if (!modes) return {success: false, error: 'Mod metadata could not be loaded'}
-            try {
-                return osu.EditCurrentPlaylistItem(room_id, buildModChange(args, room.mode, modes))
-            } catch (error) {
-                return {success: false, error: error.message}
-            }
-        },
-        "allowed_mods": async () => {
-            const parsed = buildModChange(args, room.mode, await modsReady)
-            return osu.EditCurrentPlaylistItem(room_id, {allowed_mods: [...parsed.required_mods, ...parsed.allowed_mods]});
-        }, // CUSTOM COMMAND
-        "timer": () => startTimer(integerInput(args[0] ?? 30, 'Timer seconds')),
-        "aborttimer": () => { stopLocalTimer(true); return {success: true} },
-        "kick": async () => {return osu.KickPlayer(room_id, await ircStyleUsername(args.join(' ')))},
-        "ban": async () => {return osu.BanUser(room_id, await ircStyleUsername(args.join(' ')))},
-        "password": () => {return osu.ChangeRoomSettings(room_id, {password: args[0] ?? ''})},
-        "addref": async () => {return osu.AddReferee(room_id, await ircStyleUsername(args.join(' ')))}, // technically needs to be tested
-        "removeref": async () => {return osu.RemoveReferee(room_id, await ircStyleUsername(args.join(' ')))},
-        "listrefs": () => { addSystemMsg(Object.values(room.refs).map(r => r.user.username).join(', ') || 'No referees'); return {success: true} },
-        "close": async () => {
-            const result = await osu.CloseRoom(room_id)
-            if (result.success) clearCurrentRoom()
-            return result
-        },
-        "help": () => {
-            addSystemMsg(Object.keys(map).join(', '))
-            return {success: true}
-        },
-    }
-    if (!map[cmd]) {
-        addSystemMsg(`Invalid command: ${cmd}`, 'warn')
-        return { success: false, error: `Invalid command: ${cmd}` };
-    }
-    let suc
-    try { suc = await map[cmd]() } catch (err) { suc = {success: false, error: err?.message ?? String(err)} }
-    let x = suc?.success ? "Succeeded" : "Failed"
-    let err = suc?.error ?? ""
-    if (needs_resp.includes(cmd) || !suc?.success) {
-        addSystemMsg(`Command ${cmd} ${x}. ${err}`, suc?.success ? undefined : 'warn')
-    }
-    return suc
+const commandContext = {
+    getRoom: () => room, me: ctx.me, osu, modsReady, system: addSystemMsg,
+    startTimer, stopTimer: () => stopLocalTimer(true), closeRoom: clearCurrentRoom,
+    onRooms: ids => refereeRooms.setRooms(ids),
 }
-
-// chat parsing: returns true when the text was a command
 async function commandHandler(message) {
-    if (!room) return { success: false, error: 'Join a room first' }
-    const commands = {
-        "/roll": (max) => osu.Roll(room.id, {max: integerInput(max[0] ?? 100, 'Roll maximum', { min: 1 })}),
-        "!mp": (args) => cmdRunner(room.id, args.shift(), ...args),
-    }
-    commands["!roll"] = commands["/roll"] // same as bancho
-    const cmd = commandTokens(message)
-    const root = cmd.shift()?.toLowerCase()
-    if (root === '!mp' && cmd[0]) cmd[0] = cmd[0].toLowerCase()
-    if (commands[root] != undefined) {
-        addSystemMsg(`→ ${message.trim()}`, 'cmd')
-        return commands[root](cmd);
-    }
-    return { success: false, error: `Unknown command: ${root}` };
+    addSystemMsg(`→ ${message.trim()}`, 'cmd')
+    const result = await runRefereeCommand(message, commandContext)
+    if (!result.success) addSystemMsg(result.error, 'warn')
+    return result
 }
 async function sendChatText(text) {
     text = String(text ?? '').trim()
@@ -328,7 +255,7 @@ Object.assign(ctx.actions, {
     },
     async removeRef(uid) {
         const name = room.refs[uid]?.user?.username ?? `#${uid}`
-        if (await confirmUI('Remove referee', `Remove ${name} as a referee of this room?`, { ok: 'Remove' })) await reportAction(() => osu.RemoveReferee(room.id, uid), 'Remove referee')
+        if (await confirmUI('Remove referee', `Remove ${name} as a referee of this room? Only the room host can do this.`, { ok: 'Remove' })) await reportAction(() => changeReferee(commandContext, '#' + uid, true), 'Remove referee')
     },
     openMapDlg,
     async removeMap(item) {
@@ -403,7 +330,9 @@ function openInvite(kind) {
     inviteKind = kind
     $('#inv-title').textContent = kind === 'ref' ? 'Add referee' : 'Invite player'
     $('#inv-ok').textContent = kind === 'ref' ? 'Add referee' : 'Send invite'
-    $('#inv-hint').textContent = kind === 'ref' ? 'Referees have full control of the room.' : 'This dialog stays open for multiple invites.'
+    $('#inv-hint').textContent = kind === 'ref'
+        ? 'Only the room host can add referees. Ask the recipient to open and sign in to APL Ref first, then join this room after being added. Opening osu! alone is not enough.'
+        : 'This dialog stays open for multiple invites.'
     $('#inv-name').value = ''
     setResult('inv-result', null)
     openDlg('#dlg-invite'); $('#inv-name').focus()
@@ -411,19 +340,25 @@ function openInvite(kind) {
 async function submitInvite() {
     const token = $('#inv-name').value.trim()
     if (!token) { $('#inv-name').focus(); return }
-    let user_id
-    if (token[0] === '#') user_id = parseInt(token.slice(1), 10)
-    else {
-        const u = (await window.api.api.GetUser(token)).data
-        if (!u?.id) { setResult('inv-result', { success: false, error: `User "${token}" not found` }); return }
-        user_id = u.id
-    }
-    const result = inviteKind === 'ref' ? await osu.AddReferee(room.id, user_id) : await osu.InvitePlayer(room.id, user_id)
-    setResult('inv-result', result.success ? { success: true, message: `${inviteKind === 'ref' ? 'Added' : 'Invited'} ${token}` } : result)
-    if (result.success) {
-        if (inviteKind === 'ref') closeDlg('#dlg-invite')
+    const button = $('#inv-ok'), current = room, kind = inviteKind
+    if (button.disabled) return
+    button.disabled = true
+    try {
+        if (!current) throw new Error('Join a room first')
+        let result
+        if (kind === 'ref') result = await changeReferee(commandContext, token)
+        else {
+            const target = await resolveUserTarget(token, current)
+            if (room !== current) throw new Error('Room changed; retry in the intended room')
+            result = await osu.InvitePlayer(current.id, target.id)
+        }
+        if (room !== current || kind !== inviteKind) return
+        requireSuccess(result, kind === 'ref' ? 'Add referee' : 'Invite player')
+        setResult('inv-result', { success: true, message: result.message || `Invited ${token}` })
+        if (kind === 'ref') { closeDlg('#dlg-invite'); toast(result.message, 6500) }
         else { $('#inv-name').value = ''; $('#inv-name').focus() }
-    }
+    } catch (error) { setResult('inv-result', { success: false, error: error.message }) }
+    finally { button.disabled = false }
 }
 
 function syncTrackingForm() {
@@ -527,13 +462,20 @@ $('#tb-resync').addEventListener('click', async e => {
         svg.classList.remove('spin'); if (label) label.textContent = 'Resync'; b.disabled = false
     }
 })
-$('#tb-queue').addEventListener('click', e => { e.stopPropagation(); $('#col-queue').classList.toggle('open') })
-$('#btn-queue-close').addEventListener('click', () => $('#col-queue').classList.remove('open'))
+createQueuePanel($('#view-room'), $('#col-queue'), $('#tb-queue'), $('#btn-queue-close'), $('#queue-backdrop'))
 
 $('#btn-lock').addEventListener('click', () => room && reportAction(() => osu.SetLockState(room.id, { locked: !room.locked }), 'Set lock state'))
 $('#btn-size').addEventListener('click', () => { openSettings(); $('#set-max').focus(); $('#set-max').select() })
 $('#btn-invite').addEventListener('click', () => openInvite('player'))
 $('#btn-addref').addEventListener('click', () => openInvite('ref'))
+
+$('#btn-freestyle').addEventListener('click', async () => {
+    if (ui.freestylePending || !room?.currentItem() || ['playing', 'countdown'].includes(room.status)) return
+    ui.freestylePending = true; renderMatch(room, ctx)
+    try { requireSuccess(await commandHandler(`!mp freestyle ${room.currentItem().freestyle ? 'off' : 'on'}`), 'Change Freestyle') }
+    catch (error) { toast(error.message) }
+    finally { ui.freestylePending = false; if (room) renderMatch(room, ctx) }
+})
 
 function reportAction(task, label) {
     return Promise.resolve().then(task).then(result => { requireSuccess(result, label); return result }).catch(error => toast(error.message))
@@ -587,7 +529,7 @@ $('#set-cancel').addEventListener('click', () => closeDlg('#dlg-settings'))
 $('#set-apply').addEventListener('click', applySettings)
 
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeMenus(); cmdUI.openPanel(false); $('#col-queue').classList.remove('open') }
+    if (e.key === 'Escape') { closeMenus(); cmdUI.openPanel(false) }
 })
 
 // ── landing: make / join ──────────────────────────────────────────────
@@ -629,6 +571,8 @@ $('#join-room-id').addEventListener('keydown', e => { if (e.key === 'Enter') $('
 // ── incoming events / chat / connection ───────────────────────────────
 for (const [name, subscribe] of Object.entries(window.api.on)) {
     subscribe(info => {
+        if (name === 'RefereeInvited') refereeRooms.invite(info.room_id)
+        if (name === 'RefereeRemoved' && info?.user_id === window.me?.id) refereeRooms.remove(info.room_id)
         if (Queue?.room && info?.room_id == Queue.room.id) Queue.add(new Event(name, info))
         logEvent(name, info)
     })
@@ -656,7 +600,7 @@ window.api.api.onChatMessage(async buffer => {
 async function updateStatus() {
     let connected = false
     try { const status = await window.api.GetConnectionStatus(); connected = !!(status.success && status.data?.connected) } catch { /* IPC is reconnecting */ }
-    if (connected !== ctx.connected) { ctx.connected = connected; renderTopbar(room, ctx) }
+    if (connected !== ctx.connected) { ctx.connected = connected; renderTopbar(room, ctx); if (connected) refereeRooms.refresh() }
 }
 updateStatus()
 setInterval(updateStatus, 5000)
@@ -665,7 +609,12 @@ setInterval(updateStatus, 5000)
 if (window.api.mock) {
     $('#tb-sim-wrap').hidden = false
     wireMenu('#tb-sim', '#menu-sim', { stayOpen: true })
-    $('#menu-sim').addEventListener('click', e => { const k = e.target.closest('button')?.dataset.sim; if (k) window.api.mock.trigger(k) })
+    $('#menu-sim').addEventListener('click', async e => {
+        const kind = e.target.closest('button')?.dataset.sim
+        if (!kind) return
+        const result = await window.api.mock.trigger(kind)
+        if (result?.message) toast(result.message)
+    })
     if (new URLSearchParams(location.search).has('mockjoin')) setTimeout(() => { $('#join-room-id').value = '1487223'; $('#join-room-btn').click() }, 300)
 }
 

@@ -27,6 +27,7 @@ for (const file of [
     'src/renderer/macros.js', 'src/renderer/cmdpalette.js', 'src/renderer/tracking.js',
     'src/renderer/local.js', 'src/renderer/ui/dom.js', 'src/renderer/ui/render.js',
     'src/main/http.js', 'src/renderer/bootstrap.js', 'src/renderer/inputs.js', 'src/renderer/requests.js',
+    'src/renderer/commands.js', 'src/renderer/referees.js', 'src/renderer/ui/queue.js', 'src/renderer/ui/referee-rooms.js',
 ]) {
     // ASAR paths use the host separator, including on Windows.
     const relative = file.split('/').join(path.sep)

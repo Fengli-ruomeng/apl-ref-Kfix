@@ -4,12 +4,12 @@ import { requireSuccess } from './requests.js'
 
 export class User {
     constructor(id, user, team, mods, style, status) {
-        this.id = id; // user id
-        this.user = user // user json from api
-        this.team = team // team: "red", "blue", "none"
-        this.mods = mods; // array of Mods (mod acronym, settings)
-        this.style = style; // idek man it's freestyle
-        this.status = status // spectating or idle or playing or whatever
+        this.id = id
+        this.user = user
+        this.team = team // "red" | "blue" | "none"
+        this.mods = mods
+        this.style = style // freestyle beatmap and ruleset, when the player has chosen one
+        this.status = status
     }
 }
 
@@ -30,8 +30,11 @@ export class Room {
         this.refs = {}
         this.userData = new Map()
         this.userRequests = new Map()
-        this.max_participants = resp.state.slots?.length ?? 0;
-        this.player_slots = resp.state.slots ?? []
+        // RoomJoinedResponse.max_participants is the cap. 0 and null both mean
+        // unlimited; reading it off state.slots.length treats a null slot list as 0
+        // and then cannot tell a sized room from an unlimited one.
+        this.max_participants = resp.max_participants || null
+        this.player_slots = resp.state.slots ?? resp.players.map(p => p.user_id)
         this.type = resp.state.type ?? "head_to_head"
         this.locked = resp.state.locked ?? false
 
@@ -53,8 +56,7 @@ export class Room {
         // Install server state synchronously. Profile lookups only replace
         // display data; they must not overwrite newer player events.
         for (const p of resp.players) {
-            this.players[p.user_id] = new User(p.user_id, { id: p.user_id, username: `#${p.user_id}` }, p.team, p.mods || [], p.style, p.status)
-            if (!this.player_slots.includes(p.user_id)) this.player_slots.push(p.user_id)
+            this.players[p.user_id] = new User(p.user_id, { id: p.user_id, username: `#${p.user_id}` }, p.team ?? 'none', p.mods || [], p.style, p.status)
         }
         for (const ref of resp.referees) {
             this.refs[ref.user_id] = new User(ref.user_id, { id: ref.user_id, username: `#${ref.user_id}` }, 'none', [], null, 'referee')
@@ -173,18 +175,23 @@ export class EventQueue {
             this.currentEvent = ev
             const data = ev.data
             const room = this.room
+            try {
             switch (ev.name) {
             case "UserJoined": {
                 const user = await room.GetUser(data.user_id, true)
-                room.players[data.user_id].status = "idle"
-                room.players[data.user_id].team = "none"
-                if (!room.max_participants && !room.player_slots.includes(data.user_id)) room.player_slots.push(data.user_id)
+                const player = room.players[data.user_id]
+                if (player && player.status !== 'referee') {
+                    player.status = 'idle'
+                    player.team = 'none'
+                }
+                // A sized room receives its slot array from MatchStateChanged.
+                if (room.max_participants == null && !room.player_slots.includes(data.user_id)) room.player_slots.push(data.user_id)
                 addSystemMsg(`${user.user.username} joined the room`)
             } break;
             case "UserLeft": {
                 const name = room.players[data.user_id]?.user?.username
                 delete room.players[data.user_id]
-                if (!room.max_participants) room.player_slots = room.player_slots.filter(x => x != data.user_id)
+                if (room.max_participants == null) room.player_slots = room.player_slots.filter(x => x != data.user_id)
                 if (name) addSystemMsg(`${name} left the room`)
             } break;
             case "UserKicked":
@@ -197,7 +204,7 @@ export class EventQueue {
                 }
                 const name = room.players[uid]?.user?.username
                 delete room.players[uid]
-                if (!room.max_participants) room.player_slots = room.player_slots.filter(x => x != uid)
+                if (room.max_participants == null) room.player_slots = room.player_slots.filter(x => x != uid)
                 if (name) addSystemMsg(`${name} was ${ev.name === 'UserBanned' ? 'banned' : 'kicked'}`, 'warn')
             } break;
             case "RefereeAdded": {
@@ -214,13 +221,17 @@ export class EventQueue {
                 room.name = data.name
                 room.password = data.password
                 room.type = data.type
-                room.max_participants = data.max_participants
-                if (data.max_participants == null) room.player_slots = room.player_slots.filter(x => x != null)
+                // The server reports unlimited as null or 0, depending on how the room was created.
+                room.max_participants = data.max_participants || null
+                if (room.max_participants == null) room.player_slots = room.player_slots.filter(x => x != null)
             } break;
             case "MatchStateChanged": {
                 room.locked = data.state.locked;
                 room.type = data.state.type
-                if (data.state.slots) room.player_slots = data.state.slots
+                if (Array.isArray(data.state.slots)) {
+                    room.player_slots = data.state.slots
+                    room.max_participants = data.state.slots.length || null
+                }
             } break;
             case "PlaylistItemAdded": {
                 if (data.playlist_item.was_played) {
@@ -300,6 +311,10 @@ export class EventQueue {
             }
             room.updateMode()
             room.updateUI()
+            } catch (err) {
+                // Keep going. A throw used to reject the whole drain and leave later events queued until a restart.
+                console.error(`Failed to handle ${ev.name}: ${err?.stack ?? err}`)
+            }
         }
     }
 }

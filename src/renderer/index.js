@@ -8,7 +8,7 @@ import { loadMacros, createMacroUI } from './macros.js'
 import { createCommandUI } from './cmdpalette.js'
 import { buildResult, autoAward } from './tracking.js'
 import { requireSuccess } from './requests.js'
-import { beatmapInput, commandTokens, integerInput } from './inputs.js'
+import { beatmapInput, commandTokens, integerInput, slotLimit } from './inputs.js'
 import { runRefereeCommand } from './commands.js'
 import { resolveUserTarget, changeReferee } from './referees.js'
 import { createQueuePanel } from './ui/queue.js'
@@ -396,11 +396,14 @@ async function applySettings() {
     const settings = {}
     const name = $('#set-name').value.trim()
     const password = $('#set-password').value
-    const max_participants = Math.max(0, parseInt($('#set-max').value, 10) || 0)
+    let max_participants
+    try { max_participants = slotLimit($('#set-max').value, { allowEmpty: true }) }
+    catch (error) { setResult('set-result', { success: false, error: error.message }); return }
     const type = $('#set-type').dataset.value
     if (name && name !== room.name) settings.name = name
     if (password !== (room.password ?? '')) settings.password = password
-    if (max_participants !== (room.max_participants ?? 0)) settings.max_participants = max_participants
+    // An empty field keeps the current cap. 0 is an explicit "no limit".
+    if (max_participants !== undefined && max_participants !== (room.max_participants ?? 0)) settings.max_participants = max_participants
     if (type !== room.type) settings.type = type
     if (Object.keys(settings).length) {
         const result = await osu.ChangeRoomSettings(room.id, settings)
@@ -550,11 +553,14 @@ async function updateMakePreview() {
 }
 $('#make-beatmap-id').addEventListener('input', updateMakePreview)
 $('#make-room-btn').addEventListener('click', async () => {
+    let max_participants
+    try { max_participants = slotLimit($('#make-room-max-participants').value) }
+    catch (error) { setResult('make-room-result', { success: false, error: error.message }); return }
     const result = await osu.MakeRoom({
         ruleset_id: +$('#make-ruleset').dataset.value || 0,
         beatmap_id: int('make-beatmap-id'),
         name: str('make-room-name'),
-        max_participants: Object.is(int('make-room-max-participants'), NaN) ? 0 : int('make-room-max-participants')
+        max_participants
     })
     setResult('make-room-result', result.success ? null : result)
     if (result.success && result.data) installRoomSnapshot(result.data)
@@ -571,9 +577,11 @@ $('#join-room-id').addEventListener('keydown', e => { if (e.key === 'Enter') $('
 // ── incoming events / chat / connection ───────────────────────────────
 for (const [name, subscribe] of Object.entries(window.api.on)) {
     subscribe(info => {
-        if (name === 'RefereeInvited') refereeRooms.invite(info.room_id)
-        if (name === 'RefereeRemoved' && info?.user_id === window.me?.id) refereeRooms.remove(info.room_id)
-        if (Queue?.room && info?.room_id == Queue.room.id) Queue.add(new Event(name, info))
+        // A C# long can arrive as a string. Compare before logEvent copies the payload.
+        const roomId = info?.room_id
+        if (name === 'RefereeInvited') refereeRooms.invite(roomId)
+        if (name === 'RefereeRemoved' && info?.user_id === window.me?.id) refereeRooms.remove(roomId)
+        if (Queue?.room && roomId != null && String(roomId) === String(Queue.room.id)) Queue.add(new Event(name, info))
         logEvent(name, info)
     })
 }

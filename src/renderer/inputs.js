@@ -5,6 +5,18 @@ export function integerInput(value, label, { min = 0, max = Number.MAX_SAFE_INTE
     return number
 }
 
+// ServerMultiplayerRoom accepts 0 (no limit) or a size in [2, 16]. 1 is rejected.
+export function slotLimit(value, { allowEmpty = false } = {}) {
+    const text = String(value ?? '').trim()
+    if (!text) {
+        if (allowEmpty) return undefined
+        throw new Error('Enter 0 for no limit, or a slot count from 2 to 16')
+    }
+    const number = integerInput(text, 'Slots', { max: 16 })
+    if (number !== 0 && number < 2) throw new Error('Slots must be 0 (no limit) or an integer from 2 to 16')
+    return number
+}
+
 export function beatmapInput(value) {
     const text = String(value ?? '').trim()
     if (/^\d+$/.test(text)) return { id: integerInput(text, 'Beatmap ID', { min: 1 }) }

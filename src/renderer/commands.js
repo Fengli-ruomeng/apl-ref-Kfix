@@ -1,6 +1,6 @@
 // The palette, autocomplete, help output and executor share this registry.
 import { buildModChange } from './mods.js'
-import { beatmapInput, commandTokens, integerInput } from './inputs.js'
+import { beatmapInput, commandTokens, integerInput, slotLimit } from './inputs.js'
 import { resolveUserTarget, changeReferee, refereeRoomIds } from './referees.js'
 
 const p = (k, l, t = 'text', extra = {}) => ({ k, l, t, ...extra })
@@ -42,12 +42,12 @@ export const CMD_DEFS = [
     definition('Room', 'password', 'Set or clear the password', [p('password', 'Password (empty = none)', 'text', { opt: true })],
         (c, r, a) => c.osu.ChangeRoomSettings(r.id, { password: a.join(' ') })),
     definition('Room', 'size', 'Set the number of slots', [p('slots', 'Slots (0 = no limit)', 'number', { v: 8 })],
-        (c, r, a) => c.osu.ChangeRoomSettings(r.id, { max_participants: integerInput(a[0], 'Slots', { max: 16 }) })),
-    definition('Room', 'set', 'Set team mode and size; this client has no score-mode argument', [p('mode', 'Mode', 'select', { o: [['0', 'Head-to-head'], ['1', 'Team versus']] }), p('size', 'Slots (optional)', 'number', { opt: true })], (c, r, a) => {
+        (c, r, a) => c.osu.ChangeRoomSettings(r.id, { max_participants: slotLimit(a[0]) })),
+    definition('Room', 'set', 'Set team mode and size; this client has no score-mode argument', [p('mode', 'Mode', 'select', { o: [['0', 'Head-to-head'], ['1', 'Team versus']] }), p('size', 'Slots (optional, 0 = no limit)', 'number', { opt: true })], (c, r, a) => {
         if (a.length > 2) throw new Error('Usage: !mp set <0|1> [slots]. Score mode is not supported by this client.')
         const mode = integerInput(a[0], 'Mode', { max: 1 })
         const settings = { type: mode ? 'team_versus' : 'head_to_head' }
-        if (a[1] != null) settings.max_participants = integerInput(a[1], 'Slots', { max: 16 })
+        if (a[1] != null) settings.max_participants = slotLimit(a[1])
         return c.osu.ChangeRoomSettings(r.id, settings)
     }),
     definition('Room', 'lock', 'Lock teams and slots', [], (c, r) => c.osu.SetLockState(r.id, { locked: true })),

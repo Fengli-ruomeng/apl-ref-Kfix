@@ -58,6 +58,18 @@ test('Freestyle is rejected during play and invalid values never reach the serve
     assert.equal((await runRefereeCommand('!mp freestyle maybe', f.ctx)).success, false)
     assert.equal(f.calls.length, 0)
 })
+test('slot commands allow 0 and refuse 1 or anything above 16', async () => {
+    const { runRefereeCommand } = await load('src/renderer/commands.js')
+    const f = fixture()
+    assert.equal((await runRefereeCommand('!mp size 1', f.ctx)).success, false)
+    assert.equal((await runRefereeCommand('!mp size 17', f.ctx)).success, false)
+    assert.equal((await runRefereeCommand('!mp set 1 1', f.ctx)).success, false)
+    assert.equal(f.calls.length, 0)
+    assert.equal((await runRefereeCommand('!mp size 0', f.ctx)).success, true)
+    assert.deepEqual(plain(f.calls), [['ChangeRoomSettings', 42, { max_participants: 0 }]])
+    assert.equal((await runRefereeCommand('!mp set 0 8', f.ctx)).success, true)
+    assert.deepEqual(plain(f.calls.at(-1)), ['ChangeRoomSettings', 42, { type: 'head_to_head', max_participants: 8 }])
+})
 test('server countdown cancellation and local timer cancellation stay separate', async () => {
     const { runRefereeCommand } = await load('src/renderer/commands.js')
     const f = fixture()

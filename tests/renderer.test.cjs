@@ -45,6 +45,16 @@ test('zero is a valid timer value; negative, missing and partial numbers are rej
     for (const value of ['', '-1', '10abc', '1.5']) assert.throws(() => integerInput(value, 'Timer'))
 })
 
+test('slot limits accept 0 or 2..16 and reject the sizes the server refuses', async () => {
+    const { slotLimit } = await loadModule('src/renderer/inputs.js')
+    assert.equal(slotLimit('0'), 0)
+    assert.equal(slotLimit('8'), 8)
+    assert.equal(slotLimit('16'), 16)
+    assert.equal(slotLimit('   ', { allowEmpty: true }), undefined)
+    assert.throws(() => slotLimit(''), /no limit/)
+    for (const value of ['1', '17', '8.5', 'nope']) assert.throws(() => slotLimit(value), /Slots/)
+})
+
 test('both IPC failures and legacy HTTP error payloads are rejected', async () => {
     const { requireSuccess } = await loadModule('src/renderer/requests.js')
     assert.throws(() => requireSuccess({ success: false, error: 'Forbidden' }, 'Send'), /Forbidden/)
@@ -90,6 +100,69 @@ test('profile hydration preserves newer player state and supports player/referee
     assert.equal(room.players[42].status,'ready')
     assert.equal(room.refs[42].user.username,'Player')
     assert.equal(calls,1)
+})
+
+function apiStub() {
+    return { window: { api: { api: { GetUser: async id => ({ success: true, data: { id, username: 'Player' + id } }) } } } }
+}
+async function flush() {
+    for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve))
+}
+test('a room snapshot uses max_participants and does not grow a sized slot list', async () => {
+    const { Room } = await loadModule('src/renderer/models.js', apiStub(), modelStubs)
+    const sized = snapshot()
+    sized.max_participants = 4
+    sized.state.slots = [42, null, null, null]
+    const room = new Room(sized)
+    assert.equal(room.max_participants, 4)
+    assert.deepEqual(room.player_slots, [42, null, null, null])
+    assert.equal(room.players[42].team, 'red')
+
+    const unlimited = snapshot()
+    unlimited.max_participants = 0
+    unlimited.state.slots = null
+    const open = new Room(unlimited)
+    assert.equal(open.max_participants, null)
+    assert.deepEqual(open.player_slots, [42])
+})
+
+test('joins append a slot only while the room is unlimited, and one bad event does not drop the next', async () => {
+    const notes = []
+    const { Room, Event, EventQueue } = await loadModule('src/renderer/models.js', {
+        ...apiStub(), console: { ...console, error: (...args) => notes.push(args.map(String).join(' ')) },
+    }, modelStubs)
+    const sized = snapshot()
+    sized.max_participants = 2
+    sized.state.slots = [42, null]
+    const room = new Room(sized)
+    const queue = new EventQueue(room)
+    queue.add(new Event('UserJoined', { user_id: 7 }))
+    await flush()
+    assert.deepEqual(room.player_slots, [42, null])
+    assert.equal(room.players[7].status, 'idle')
+    assert.equal(room.players[7].team, 'none')
+
+    const openData = snapshot()
+    openData.max_participants = null
+    openData.state.slots = null
+    const open = new Room(openData)
+    await flush()
+    const openQueue = new EventQueue(open)
+    open.GetUser = async () => { throw new Error('profile lookup failed') }
+    openQueue.add(new Event('UserJoined', { user_id: 9 }))
+    openQueue.add(new Event('UserLeft', { user_id: 42 }))
+    await flush()
+    assert.equal(open.players[42], undefined)
+    assert.deepEqual(open.player_slots, [])
+
+    openQueue.add(new Event('RoomSettingsChanged', { name: 'Renamed', password: '', type: 'head_to_head', max_participants: 0 }))
+    openQueue.add(new Event('MatchStateChanged', { state: { locked: true, type: 'team_versus', slots: [null, null, null] } }))
+    await flush()
+    assert.equal(open.name, 'Renamed')
+    assert.equal(open.locked, true)
+    assert.equal(open.max_participants, 3)
+    assert.deepEqual(open.player_slots, [null, null, null])
+    assert.match(notes.join('\n'), /UserJoined/)
 })
 
 test('looking up a chat sender does not grant them a referee or player role', async () => {

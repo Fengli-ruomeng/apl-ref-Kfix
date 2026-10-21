@@ -198,7 +198,7 @@
           <div><span class="label">Ruleset</span><div id="make-ruleset" class="seg seg-lg"></div></div>
           <div class="grid grid-cols-[1fr_7rem] gap-3">
             <label class="block"><span class="label">First beatmap ID</span><input id="make-beatmap-id" class="input font-mono" type="number" value="2626718"></label>
-            <label class="block"><span class="label">Slots</span><input id="make-room-max-participants" class="input font-mono" type="number" value="8" min="0" max="16"></label>
+            <label class="block"><span class="label">Slots (0 = no limit)</span><input id="make-room-max-participants" class="input font-mono" type="number" value="8" min="0" max="16"></label>
           </div>
           <div id="make-preview" class="text-xs text-muted font-mono -mt-1 min-h-4"></div>
           <div class="flex items-center justify-end gap-3 mt-1"><span class="result-msg" id="make-room-result"></span><button id="make-room-btn" class="btn btn-primary">Create room</button></div>
@@ -253,7 +253,7 @@
   <div class="grid grid-cols-2 gap-3">
     <label class="block col-span-2"><span class="label">Room name</span><input id="set-name" class="input"></label>
     <label class="block"><span class="label">Password</span><input id="set-password" class="input font-mono" placeholder="none"></label>
-    <label class="block"><span class="label">Max participants</span><input id="set-max" class="input font-mono" type="number" min="0" max="16"></label>
+    <label class="block"><span class="label">Slots (0 = no limit)</span><input id="set-max" class="input font-mono" type="number" min="0" max="16" placeholder="empty keeps current"></label>
     <div class="col-span-2"><span class="label">Match type</span><div id="set-type" class="seg seg-lg"></div></div>
   </div>
   <div class="border-t border-line pt-3 flex flex-col gap-3">

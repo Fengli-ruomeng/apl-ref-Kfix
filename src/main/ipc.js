@@ -33,10 +33,7 @@ function genericHandler(getRefereeClient, cmd) {
             const result = await refereeClient[cmd](...args)
             return { success: true, data: result }
         } catch (err) {
-            console.log(err, "oh")
-            console.log(cmd);
-            console.log(...args)
-            //console.log(refereeClient)
+            getLogger(["apl-ref", "ipc"]).error("Referee command {cmd} failed: {message}", { cmd, message: err?.message ?? String(err) })
             return { success: false, error: err.message }
         }
 
@@ -77,12 +74,10 @@ function setupIpcHandlers(getRefereeClient) {
             Authorization: `Bearer ${accessToken}`,
         }
 
-        const x = fetchJson(url, {
+        return fetchJson(url, {
             method: "GET",
             headers,
         })
-        //console.log(x)
-        return x;
     }))
     ipcMain.handle('GetSelf', createQueryHandler(getRefereeClient, async (client) => {
         const accessToken = await client.getAccessToken();
@@ -93,12 +88,10 @@ function setupIpcHandlers(getRefereeClient) {
             Authorization: `Bearer ${accessToken}`,
         }
 
-        const x = fetchJson(url, {
+        return fetchJson(url, {
             method: "GET",
             headers,
         })
-        //console.log(x)
-        return x;
     }))
     ipcMain.handle('SendMessage', createQueryHandler(getRefereeClient, async (client, channel_id, message) => {
         const accessToken = await client.getAccessToken();
@@ -183,7 +176,6 @@ function setupWSEvents(tokenProvider, sendFunc) {
             attempts = 0
         })
         ws.on('message', (buffer) => {
-            //console.log(buffer.toString())
             sendFunc('chat-event', buffer.toString())
         });
         ws.on('close', reconnect)

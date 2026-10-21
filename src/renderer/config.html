@@ -37,10 +37,8 @@
             document.getElementById("save-config").addEventListener('click', () => {
             const id = int('client-id')
             const secret = str('client-secret')
-            console.log(id, secret)
             window.api.config.SendConfig(id, secret)
             })
-            console.log("hi")
         </script>
   </body>
 </html>

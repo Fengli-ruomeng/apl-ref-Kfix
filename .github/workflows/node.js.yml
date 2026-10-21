@@ -54,13 +54,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-        env:
-          # The legacy electron-prebuilt-compile dependency also installs Electron 8,
-          # which has no Apple Silicon build. Only download the current runtime.
-          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-
-      - name: Install current Electron runtime
-        run: node node_modules/electron/install.js
 
       - name: Run regression tests
         run: npm test

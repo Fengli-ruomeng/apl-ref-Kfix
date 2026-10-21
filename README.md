@@ -4,7 +4,7 @@
 
 
 ## Download
-[Releases](https://github.com/Fengli-ruomeng/apl-ref-Kfix/releases/latest)
+[Releases](https://github.com/applearon/apl-ref/releases/latest)
 
 ## Setup
 See [SETUP.md](SETUP.md)
